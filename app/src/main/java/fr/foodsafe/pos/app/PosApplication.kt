@@ -17,6 +17,11 @@ open class PosApplication : Application() {
         vatNumber = "FR00000000000",
     )
 
+    override fun onCreate() {
+        super.onCreate()
+        CrashReport.install(this)
+    }
+
     val repository by lazy {
         PosRepository(PosDatabase.build(this), establishment, terminalId = "T01", keys = keyProvider())
     }

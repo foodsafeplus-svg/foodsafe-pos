@@ -18,25 +18,34 @@ data class Product(
 
 /** SIMULÉ : catalogue de démonstration codé en dur (le catalogue éditable arrive en phase 1). */
 object DemoCatalog {
-    val categories = listOf("Entrées", "Pizzas", "Desserts", "Boissons")
+    /** Deux rangées de quatre onglets, comme sur les caisses de comptoir. */
+    val categories = listOf("Entrées", "Pizzas", "Pâtes", "Desserts", "Glaces", "Softs", "Alcools", "Cafés")
+
+    private fun p(id: String, label: String, cents: Long, vat: fr.foodsafe.pos.core.money.BasisPoints, dest: String, level: ServiceLevel, cat: String) =
+        Product(id, label, Cents(cents), vat, dest, level, cat)
 
     val products = listOf(
-        Product("salade", "Salade César", Cents(950), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(1), "Entrées"),
-        Product("burrata", "Burrata", Cents(1100), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(1), "Entrées"),
-        Product("bruschetta", "Bruschetta", Cents(750), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(1), "Entrées"),
-        Product("margherita", "Pizza Margherita", Cents(1200), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
-        Product("reine", "Pizza Reine", Cents(1350), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
-        Product("4fromages", "Pizza 4 fromages", Cents(1450), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
-        Product("calzone", "Calzone", Cents(1300), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
-        Product("chorizo", "Pizza Chorizo", Cents(1350), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
-        Product("vegetarienne", "Pizza Végétarienne", Cents(1300), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
-        Product("tiramisu", "Tiramisu", Cents(650), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(3), "Desserts"),
-        Product("pannacotta", "Panna cotta", Cents(600), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(3), "Desserts"),
-        Product("glace", "Glace 2 boules", Cents(500), FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(3), "Desserts"),
-        Product("biere", "Bière pression", Cents(600), FrenchVat.NORMAL, "BAR", ServiceLevel.DIRECT, "Boissons"),
-        Product("vin", "Verre de vin", Cents(550), FrenchVat.NORMAL, "BAR", ServiceLevel.DIRECT, "Boissons"),
-        Product("eau", "Eau minérale", Cents(400), FrenchVat.INTERMEDIATE, "BAR", ServiceLevel.DIRECT, "Boissons"),
-        Product("soda", "Soda 33 cl", Cents(350), FrenchVat.INTERMEDIATE, "BAR", ServiceLevel.DIRECT, "Boissons"),
-        Product("cafe", "Café", Cents(200), FrenchVat.INTERMEDIATE, "BAR", ServiceLevel(3), "Boissons"),
+        p("salade", "Salade César", 950, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(1), "Entrées"),
+        p("burrata", "Burrata", 1100, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(1), "Entrées"),
+        p("bruschetta", "Bruschetta", 750, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(1), "Entrées"),
+        p("margherita", "Pizza Margherita", 1200, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
+        p("reine", "Pizza Reine", 1350, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
+        p("4fromages", "Pizza 4 fromages", 1450, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
+        p("calzone", "Calzone", 1300, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
+        p("chorizo", "Pizza Chorizo", 1350, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
+        p("vegetarienne", "Pizza Végétarienne", 1300, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pizzas"),
+        p("carbonara", "Pâtes carbonara", 1250, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pâtes"),
+        p("bolognaise", "Pâtes bolognaise", 1200, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(2), "Pâtes"),
+        p("tiramisu", "Tiramisu", 650, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(3), "Desserts"),
+        p("pannacotta", "Panna cotta", 600, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(3), "Desserts"),
+        p("glace", "Glace 2 boules", 500, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(3), "Glaces"),
+        p("glace3", "Glace 3 boules", 650, FrenchVat.INTERMEDIATE, "CUISINE", ServiceLevel(3), "Glaces"),
+        p("eau", "Eau minérale", 400, FrenchVat.INTERMEDIATE, "BAR", ServiceLevel.DIRECT, "Softs"),
+        p("soda", "Soda 33 cl", 350, FrenchVat.INTERMEDIATE, "BAR", ServiceLevel.DIRECT, "Softs"),
+        p("jus", "Jus d'orange", 400, FrenchVat.INTERMEDIATE, "BAR", ServiceLevel.DIRECT, "Softs"),
+        p("biere", "Bière pression", 600, FrenchVat.NORMAL, "BAR", ServiceLevel.DIRECT, "Alcools"),
+        p("vin", "Verre de vin", 550, FrenchVat.NORMAL, "BAR", ServiceLevel.DIRECT, "Alcools"),
+        p("cafe", "Café", 200, FrenchVat.INTERMEDIATE, "BAR", ServiceLevel(3), "Cafés"),
+        p("the", "Thé", 300, FrenchVat.INTERMEDIATE, "BAR", ServiceLevel(3), "Cafés"),
     )
 }

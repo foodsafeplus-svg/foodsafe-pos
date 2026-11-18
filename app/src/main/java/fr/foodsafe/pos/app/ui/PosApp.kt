@@ -122,8 +122,9 @@ fun PosApp(vm: PosViewModel = viewModel()) {
                 },
             ) {
                 if (state.user == null) LoginScreen(vm.establishmentName, state.loginError, vm::login) else MainScreen(state, vm)
-                // Notifications au-dessus des totaux de la note (zone sans bouton) : jamais sur ENCAISSER, le pavé ni les moyens de paiement.
-                SnackbarHost(snackbar, Modifier.align(Alignment.BottomStart).padding(bottom = 84.dp).fillMaxWidth(0.36f))
+                // Notifications dans le bandeau du haut, entre les onglets et le nom de l'utilisateur (zone sans bouton) :
+                // jamais sur la note, le pavé, les produits ni les moyens de paiement.
+                SnackbarHost(snackbar, Modifier.align(Alignment.TopEnd).padding(end = 330.dp).fillMaxWidth(0.3f))
             }
         }
         state.approval?.let { ApprovalDialog(it, vm::approve, vm::dismissApproval) }
@@ -313,22 +314,35 @@ private fun TablesScreen(vm: PosViewModel) {
     if (askNumber) NumberDialog("Numéro de la table", onDismiss = { askNumber = false }) { askNumber = false; vm.newTable(it) }
 }
 
-// ---------------------------------------------------------------- Commande : note à gauche, fonctions au centre, produits à droite
+// ---------------------------------------------------------------- Commande : note + pavé à gauche, actions au centre, produits à droite
 
 @Composable
 private fun OrderScreen(s: OrderSnapshot, selectedLevel: ServiceLevel?, vm: PosViewModel) {
     var cancelTarget by remember { mutableStateOf<OrderLine?>(null) }
     var showDiscount by remember { mutableStateOf(false) }
     var paying by remember(s.order.id) { mutableStateOf(false) }
+    var selectedLineId by remember(s.order.id) { mutableStateOf<String?>(null) }
     val paid = s.order.status == OrderStatus.PAID
+    // Ligne visée par « Supprimer ligne » : celle touchée, sinon la dernière ligne active.
+    val targetLine = s.order.lines.firstOrNull { it.id == selectedLineId && it.isActive } ?: s.order.activeLines.lastOrNull()
 
     Row(Modifier.fillMaxSize()) {
-        TicketPanel(s, Modifier.weight(0.36f), showPay = !paying, onCancel = { cancelTarget = it }, onPay = { paying = true }, vm = vm)
+        Column(Modifier.weight(0.40f).fillMaxHeight().background(TicketBg)) {
+            TicketPanel(s, Modifier.weight(1f), selectedLineId = targetLine?.id, onSelect = { selectedLineId = it })
+            if (paid) {
+                Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    s.ticket?.let { t -> PadKey("Voir le ticket", Modifier.weight(1f).height(56.dp), color = NavySoft, textColor = Color.White, fontSize = 16.sp) { vm.showDocument(t) } }
+                    PadKey("Retour aux tables", Modifier.weight(1f).height(56.dp), color = FsBlue, textColor = Color.White, fontSize = 16.sp) { vm.backToTables() }
+                }
+            } else if (!paying) {
+                SaleKeypad(s, Modifier.height(300.dp), onPay = { paying = true }, vm = vm)
+            }
+        }
         if (paying && !paid) {
-            PaymentPanel(s, Modifier.weight(0.64f), onBack = { paying = false }, onDiscount = { showDiscount = true }, vm = vm)
+            PaymentPanel(s, Modifier.weight(0.60f), onBack = { paying = false }, onDiscount = { showDiscount = true }, vm = vm)
         } else {
-            FunctionColumn(s, Modifier.width(128.dp), onDiscount = { showDiscount = true }, vm = vm)
-            ProductPanel(paid, selectedLevel, Modifier.weight(0.64f), vm)
+            ActionColumn(s, Modifier.width(118.dp), onCancelLine = { targetLine?.let { cancelTarget = it } }, onDiscount = { showDiscount = true }, vm = vm)
+            ProductPanel(paid, selectedLevel, Modifier.weight(0.60f), vm)
         }
     }
     cancelTarget?.let { line -> CancelDialog(line, onDismiss = { cancelTarget = null }) { reason -> vm.cancel(line.id, reason); cancelTarget = null } }
@@ -336,133 +350,220 @@ private fun OrderScreen(s: OrderSnapshot, selectedLevel: ServiceLevel?, vm: PosV
 }
 
 @Composable
-private fun TicketPanel(s: OrderSnapshot, modifier: Modifier, showPay: Boolean, onCancel: (OrderLine) -> Unit, onPay: () -> Unit, vm: PosViewModel) {
+private fun TicketPanel(s: OrderSnapshot, modifier: Modifier, selectedLineId: String?, onSelect: (String) -> Unit) {
     val priced = s.priced
     val paid = s.order.status == OrderStatus.PAID
-    val fmt = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE) }
+    val isNew = s.order.activeLines.isEmpty()
+    val hour = remember { SimpleDateFormat("HH:mm", Locale.FRANCE) }
+    val full = remember { SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.FRANCE) }
     val now = rememberNow()
-    Column(modifier.fillMaxHeight().background(TicketBg).padding(8.dp)) {
-        // En-tête : table et statut, serveur et date
-        Row(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(8.dp)).background(Navy)) {
-            Column(
-                Modifier.width(110.dp).fillMaxHeight().background(if (paid) PayCash else Color(0xFFC0392B)),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
-            ) {
-                Text("TABLE ${s.order.tableNumber}", color = Color.White, fontWeight = FontWeight.Black, fontSize = 15.sp)
-                Text(statusLabel(s.order.status).uppercase(), color = Color.White, fontSize = 11.sp)
+    Column(modifier.fillMaxWidth().padding(6.dp)) {
+        // En-tête : état (blanc = nouvelle, rouge = en cours, vert = soldée), mode de vente, montant et nombre d'articles
+        Row(Modifier.fillMaxWidth().height(62.dp).clip(RoundedCornerShape(6.dp)).background(Navy)) {
+            val stateColor = when { paid -> PayCash; isNew -> Color.White; else -> Color(0xFFD62828) }
+            val stateText = if (stateColor == Color.White) Navy else Color.White
+            Column(Modifier.width(104.dp).fillMaxHeight().background(stateColor), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text("TABLE ${s.order.tableNumber}", color = stateText, fontWeight = FontWeight.Black, fontSize = 15.sp)
+                Text(if (isNew && !paid) "NOUVELLE" else statusLabel(s.order.status).uppercase(), color = stateText, fontSize = 11.sp)
             }
-            Column(Modifier.padding(horizontal = 10.dp).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
-                Text("Serveur : ${s.order.ownerEmployeeId}", color = Color.White, fontSize = 13.sp)
-                Text("Articles : ${s.order.activeLines.size} · ${fmt.format(Date(now))}", color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+            Column(Modifier.width(84.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text("SUR", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("PLACE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 8.dp), verticalArrangement = Arrangement.Center) {
+                if (isNew) {
+                    Text("BIENVENUE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(full.format(Date(now)), color = Color.White, fontSize = 13.sp)
+                } else {
+                    Text("À PAYER : ${priced.totalTtc.format()}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("NB ART : ${s.order.activeLines.size} · ${s.order.ownerEmployeeId}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                }
             }
         }
-        // Lignes de la note
-        LazyColumn(Modifier.weight(1f).padding(top = 6.dp)) {
+        // Lignes : serveur et heure, quantité, libellé, PU, total, état (E = envoyée en cuisine)
+        LazyColumn(Modifier.weight(1f).padding(top = 4.dp).background(Color.White)) {
             priced.lines.groupBy { it.line.level.value }.toSortedMap().forEach { (level, lines) ->
                 item {
                     val claimed = level in s.order.claimedLevels
                     Text(ServiceLevel(level).label + if (level > 0 && claimed) " · réclamé" else if (level > 1) " · à suivre" else "",
-                        fontWeight = FontWeight.Bold, color = FsBlue, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+                        fontWeight = FontWeight.Bold, color = FsBlue, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
                 }
                 items(lines, key = { it.line.id }) { pl ->
-                    Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(KitchenTicketRenderer.formatQty(pl.line.quantityMilli), Modifier.width(26.dp), fontWeight = FontWeight.Bold)
-                        Text((if (pl.line.isSent) "✓ " else "") + pl.line.label, Modifier.weight(1f), color = if (pl.line.isSent) Muted else Color.Unspecified, fontSize = 14.sp)
-                        if (pl.gross != pl.net) Text(pl.gross.format(false), textDecoration = TextDecoration.LineThrough, color = Muted, fontSize = 12.sp)
-                        Text(" " + pl.net.format(false), fontWeight = FontWeight.SemiBold)
-                        if (!paid) Text("✕", Modifier.clickable { onCancel(pl.line) }.padding(start = 10.dp, end = 2.dp), color = Color(0xFFC0392B), fontWeight = FontWeight.Bold)
+                    val l = pl.line
+                    Row(
+                        Modifier.fillMaxWidth().background(if (l.id == selectedLineId && !paid) Color(0xFFDDE3EC) else Color.White)
+                            .clickable(enabled = !paid) { onSelect(l.id) }.padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.width(44.dp)) {
+                            Text(l.authorEmployeeId.uppercase().take(6), fontSize = 8.sp, color = Muted, maxLines = 1)
+                            Text(hour.format(Date(l.createdAt)), fontSize = 8.sp, color = Muted)
+                        }
+                        Text(KitchenTicketRenderer.formatQty(l.quantityMilli), Modifier.width(22.dp), fontWeight = FontWeight.Bold)
+                        Text(l.label, Modifier.weight(1f), fontSize = 14.sp, maxLines = 1)
+                        Text("PU ${l.unitPriceTtc.format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
+                        if (pl.gross != pl.net) Text(pl.gross.format(false) + " ", textDecoration = TextDecoration.LineThrough, color = Muted, fontSize = 11.sp)
+                        Text(pl.net.format(false), Modifier.width(50.dp), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
+                        Text(if (l.isSent) "E" else "", Modifier.width(16.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E9E4F), textAlign = TextAlign.End)
                     }
                     HorizontalDivider(color = TicketBg)
                 }
             }
             val cancelled = s.order.lines.filter { !it.isActive }
             if (cancelled.isNotEmpty()) item {
-                Text("Annulées", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                cancelled.forEach { Text("${it.label} · motif : ${it.cancellation?.reason}", color = Muted, textDecoration = TextDecoration.LineThrough, fontSize = 12.sp) }
+                Text("Annulées", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp, top = 8.dp))
+                cancelled.forEach { Text("${it.label} · motif : ${it.cancellation?.reason}", color = Muted, textDecoration = TextDecoration.LineThrough, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp)) }
             }
         }
-        // Totaux
-        HorizontalDivider(color = Muted.copy(alpha = 0.4f))
-        Row(Modifier.padding(top = 4.dp)) {
+        // Pied : poste et serveur à gauche, totaux à droite
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
             Column(Modifier.weight(1f)) {
-                Text("SOUS-TOTAL : ${(priced.totalTtc + priced.totalDiscount).format(false)}", fontSize = 11.sp, color = Muted)
-                Text("DONT REMISE : ${priced.totalDiscount.format(false)}", fontSize = 11.sp, color = Muted)
-                priced.taxes.byRate.forEach { Text("TVA ${it.rate.format()} : ${it.vat.format(false)}", fontSize = 11.sp, color = Muted) }
+                Text("T01", fontSize = 11.sp, color = Muted)
+                Text(s.order.ownerEmployeeId.uppercase(), fontSize = 11.sp, color = Muted)
             }
             Column(horizontalAlignment = Alignment.End) {
+                Text("SOUS-TOTAL : ${(priced.totalTtc + priced.totalDiscount).format(false)}   DONT REMISE : ${priced.totalDiscount.format(false)}", fontSize = 10.sp, color = Muted)
                 Text("NET À PAYER : ${priced.totalTtc.format()}", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Navy)
+                Text(priced.taxes.byRate.joinToString("   ") { "TVA ${it.rate.format()} : ${it.vat.format(false)}" }, fontSize = 10.sp, color = Muted)
                 if (s.payments.isNotEmpty() && !paid) Text("Reste à payer ${s.remaining.format()}", color = FsBlue, fontWeight = FontWeight.Bold)
             }
-        }
-        Spacer(Modifier.height(6.dp))
-        if (paid) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                s.ticket?.let { t -> PadKey("Voir le ticket", Modifier.weight(1f).height(56.dp), color = NavySoft, textColor = Color.White, fontSize = 16.sp) { vm.showDocument(t) } }
-                PadKey("Retour aux tables", Modifier.weight(1f).height(56.dp), color = FsBlue, textColor = Color.White, fontSize = 16.sp) { vm.backToTables() }
-            }
-        } else if (showPay) {
-            PadKey("ENCAISSER", Modifier.fillMaxWidth().height(64.dp), color = PayCash, textColor = Color.White, fontSize = 22.sp,
-                enabled = priced.lines.isNotEmpty(), onClick = onPay)
         }
     }
 }
 
-/** Colonne sombre de fonctions, chacune avec une pastille colorée. Seules les fonctions réellement disponibles y figurent. */
+/**
+ * Sous la note : colonne noire (navigation) et pavé avec raccourcis de paiement.
+ * Montant tapé puis ESP / CB = règlement immédiat de ce montant (vide = reste dû) ; 10 € / 20 € = billet remis en espèces.
+ */
 @Composable
-private fun FunctionColumn(s: OrderSnapshot, modifier: Modifier, onDiscount: () -> Unit, vm: PosViewModel) {
+private fun SaleKeypad(s: OrderSnapshot, modifier: Modifier, onPay: () -> Unit, vm: PosViewModel) {
+    val rest = s.remaining
+    val canPay = s.priced.lines.isNotEmpty() && rest.value > 0
+    var entry by remember(rest) { mutableStateOf("") }
+    val amount = parseAmount(entry) ?: rest
+    Row(modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.width(104.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp)).background(Navy).padding(vertical = 4.dp)) {
+            FunctionButton("≡", Color(0xFFF5B800), "Tables", onClick = vm::backToTables)
+            Spacer(Modifier.weight(1f))
+            FunctionButton("⏸", Color(0xFF8A94A8), "Mettre en attente", onClick = vm::backToTables)
+            FunctionButton("←", Color(0xFFB23B3B), "Quitter", onClick = { vm.logout() })
+        }
+        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.weight(0.8f), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Box(Modifier.weight(3f).fillMaxHeight().clip(RoundedCornerShape(6.dp)).background(Color.White).padding(horizontal = 10.dp), contentAlignment = Alignment.CenterEnd) {
+                    Text(entry.ifEmpty { " " }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Navy)
+                }
+                PadKey("⌫", Modifier.weight(1f).fillMaxHeight(), fontSize = 18.sp) { entry = entry.dropLast(1) }
+            }
+            listOf(listOf("7", "8", "9"), listOf("4", "5", "6"), listOf("1", "2", "3"), listOf("C", "0", ",")).forEach { row ->
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    row.forEach { k -> PadKey(k, Modifier.weight(1f).fillMaxHeight(), fontSize = 20.sp) { entry = if (k == "C") "" else typeAmount(entry, k) } }
+                }
+            }
+            Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    PadKey("10 €", Modifier.weight(1f).fillMaxWidth(), color = PayCash, textColor = Color.White, fontSize = 14.sp, enabled = canPay) { vm.pay(PaymentMethod.CASH, Cents(1000)) }
+                    PadKey("20 €", Modifier.weight(1f).fillMaxWidth(), color = PayCash, textColor = Color.White, fontSize = 14.sp, enabled = canPay) { vm.pay(PaymentMethod.CASH, Cents(2000)) }
+                }
+                PadKey("ESP", Modifier.weight(1f).fillMaxHeight(), color = PayCash, textColor = Color.White, fontSize = 18.sp, enabled = canPay) { vm.pay(PaymentMethod.CASH, amount); entry = "" }
+                PadKey("CB", Modifier.weight(1f).fillMaxHeight(), color = PayCard, textColor = Color.White, fontSize = 18.sp, enabled = canPay && amount <= rest) { vm.pay(PaymentMethod.CARD, amount); entry = "" }
+                PadKey("ENCAISSER", Modifier.weight(1.3f).fillMaxHeight(), color = Color(0xFF3E9E33), textColor = Color.White, fontSize = 14.sp, enabled = canPay, onClick = onPay)
+            }
+        }
+    }
+}
+
+private fun parseAmount(entry: String): Cents? =
+    entry.takeIf { it.isNotBlank() }?.replace(',', '.')?.toBigDecimalOrNull()?.movePointRight(2)?.toLong()?.takeIf { it > 0 }?.let(::Cents)
+
+private fun typeAmount(entry: String, k: String): String = when {
+    k == "," && entry.contains(',') -> entry
+    k == "," -> entry.ifEmpty { "0" } + ","
+    entry.contains(',') && entry.substringAfter(',').length >= 2 -> entry
+    entry.length >= 7 -> entry
+    else -> entry + k
+}
+
+/** Colonne noire d'actions sur la note. Seules les actions réellement disponibles y figurent. */
+@Composable
+private fun ActionColumn(s: OrderSnapshot, modifier: Modifier, onCancelLine: () -> Unit, onDiscount: () -> Unit, vm: PosViewModel) {
     val paid = s.order.status == OrderStatus.PAID
+    val hasLines = s.order.activeLines.isNotEmpty()
     val nextClaim = KitchenDispatcher.nextClaimableLevel(s.order)
-    Column(modifier.fillMaxHeight().background(Navy).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.fillMaxHeight().background(Navy).padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         FunctionButton("➜", Color(0xFF2E9E4F), "Envoyer commande", enabled = !paid, onClick = vm::send)
         if (nextClaim != null && !paid) FunctionButton("N", Color(0xFF7B4FD6), "Réclamer ${nextClaim.label}", onClick = vm::claim)
-        FunctionButton("%", Color(0xFF2BA6C9), "Remise note %", enabled = !paid, onClick = onDiscount)
-        FunctionButton("≡", Accent, "Imprimer la note", enabled = !paid && s.priced.lines.isNotEmpty(), onClick = vm::printNote)
-        Spacer(Modifier.weight(1f))
-        FunctionButton("←", Color(0xFF8A94A8), if (paid) "Tables" else "Mettre en attente", onClick = vm::backToTables)
+        FunctionButton("−", Accent, "Supprimer ligne", enabled = !paid && hasLines, onClick = onCancelLine)
+        FunctionButton("%", Color(0xFF1FB5A8), "Remise note %", enabled = !paid, onClick = onDiscount)
+        FunctionButton("≡", Color(0xFFF08A30), "Imprimer la note", enabled = !paid && hasLines, onClick = vm::printNote)
     }
 }
 
 @Composable
 private fun FunctionButton(icon: String, iconColor: Color, label: String, enabled: Boolean = true, onClick: () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 8.dp, horizontal = 4.dp),
+        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 7.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(if (enabled) iconColor else iconColor.copy(alpha = 0.3f)), contentAlignment = Alignment.Center) {
             Text(icon, color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
         }
-        Text(label, color = if (enabled) Color.White else Color.White.copy(alpha = 0.35f), fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 3.dp))
+        Text(label.uppercase(), color = if (enabled) Color.White else Color.White.copy(alpha = 0.35f), fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 3.dp))
     }
 }
+
+/** Couleurs de tuiles par famille : deux teintes alternées par rangée (comme petite / grande taille). */
+private val FamilyTiles = mapOf(
+    "Entrées" to (Color(0xFF9EDC8C) to Color(0xFFC8CCD2)),
+    "Pizzas" to (Color(0xFF9EDC8C) to Color(0xFFB7C3EA)),
+    "Pâtes" to (Color(0xFFD9A066) to Color(0xFFE8C88E)),
+    "Desserts" to (Color(0xFFFFB6C6) to Color(0xFFF7D2DB)),
+    "Glaces" to (Color(0xFFC98A6A) to Color(0xFFFFC6D3)),
+    "Softs" to (Color(0xFF7FD8E8) to Color(0xFFB9E6EE)),
+    "Alcools" to (Color(0xFFF2A07E) to Color(0xFFB8C9A0)),
+    "Cafés" to (Color(0xFFE8C832) to Color(0xFFF1DC7A)),
+)
 
 @Composable
 private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: Modifier, vm: PosViewModel) {
     var category by remember { mutableStateOf(DemoCatalog.categories.first()) }
-    Column(modifier.fillMaxHeight().background(Color.White).padding(8.dp)) {
-        // Familles
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            DemoCatalog.categories.forEach { c ->
-                Box(
-                    Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(6.dp)).background(if (c == category) Color(0xFF5B6E9C) else Navy).clickable { category = c },
-                    contentAlignment = Alignment.Center,
-                ) { Text(c.uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
+    Column(modifier.fillMaxHeight().background(Color.White).padding(6.dp)) {
+        // Familles : deux rangées de quatre onglets, gris et noir en alternance, l'onglet actif en bleu
+        DemoCatalog.categories.chunked(4).forEachIndexed { r, row ->
+            Row(Modifier.padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                row.forEachIndexed { i, c ->
+                    val base = if ((r + i) % 2 == 0) Color(0xFF6E737C) else Color(0xFF111418)
+                    Box(
+                        Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(4.dp)).background(if (c == category) FsBlue else base).clickable { category = c },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(c.uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
         // Niveau d'envoi des prochains articles
-        Row(Modifier.padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             LevelChip("Niveau produit", selectedLevel == null) { vm.selectLevel(null) }
             (0..3).forEach { l -> ServiceLevel(l).let { lvl -> LevelChip(lvl.label, selectedLevel == lvl) { vm.selectLevel(lvl) } } }
         }
         val products = DemoCatalog.products.filter { it.category == category }
-        val tile = if (DemoCatalog.categories.indexOf(category) % 2 == 0) TileGreen else TileLavender
-        LazyVerticalGrid(GridCells.Fixed(4), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(products, key = { it.id }) { p ->
-                Box(
-                    Modifier.height(86.dp).clip(RoundedCornerShape(6.dp)).background(if (paid) tile.copy(alpha = 0.4f) else tile)
-                        .border(1.dp, Color.White, RoundedCornerShape(6.dp)).clickable(enabled = !paid) { vm.add(p) }.padding(6.dp),
-                ) {
-                    Text(p.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 13.sp, color = Navy)
-                    Text(p.label, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Navy, textAlign = TextAlign.Center, maxLines = 2)
+        val (c1, c2) = FamilyTiles[category] ?: (TileGreen to TileLavender)
+        // Grille fixe de 5 colonnes ; les cases vides restent visibles pour garder des repères stables.
+        val cells = products + List((5 - products.size % 5) % 5 + if (products.size < 10) 5 else 0) { null }
+        LazyVerticalGrid(GridCells.Fixed(5), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(cells.size) { idx ->
+                val p = cells[idx]
+                if (p == null) {
+                    Box(Modifier.height(82.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFF0F1F3)))
+                } else {
+                    val tile = if ((idx / 5) % 2 == 0) c1 else c2
+                    Box(
+                        Modifier.height(82.dp).clip(RoundedCornerShape(4.dp)).background(if (paid) tile.copy(alpha = 0.4f) else tile)
+                            .clickable(enabled = !paid) { vm.add(p) }.padding(5.dp),
+                    ) {
+                        Text(p.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = Navy)
+                        Text(p.label, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Navy, textAlign = TextAlign.Center, maxLines = 2)
+                    }
                 }
             }
         }
@@ -476,23 +577,13 @@ private fun LevelChip(label: String, selected: Boolean, onClick: () -> Unit) {
     ) { Text(label, color = if (selected) Color.White else Navy, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
 }
 
-// ---------------------------------------------------------------- Encaissement (remplace fonctions et produits, la note reste visible)
+// ---------------------------------------------------------------- Encaissement (remplace actions et produits, la note reste visible)
 
 @Composable
 private fun PaymentPanel(s: OrderSnapshot, modifier: Modifier, onBack: () -> Unit, onDiscount: () -> Unit, vm: PosViewModel) {
     val rest = s.remaining
     var entry by remember(rest) { mutableStateOf("") }
-    val amount: Cents? = if (entry.isBlank()) rest else entry.replace(',', '.').toBigDecimalOrNull()
-        ?.movePointRight(2)?.toLong()?.takeIf { it > 0 }?.let(::Cents)
-    fun type(k: String) {
-        entry = when {
-            k == "," && entry.contains(',') -> entry
-            k == "," -> entry.ifEmpty { "0" } + ","
-            entry.substringAfter(',', "").length >= 2 && entry.contains(',') -> entry
-            entry.length >= 7 -> entry
-            else -> entry + k
-        }
-    }
+    val amount: Cents? = if (entry.isBlank()) rest else parseAmount(entry)
     val totalReceived = Cents(s.payments.sumOf { it.tendered.value })
 
     Column(modifier.fillMaxHeight().background(Color(0xFFDCE4F0)).padding(8.dp)) {
@@ -510,7 +601,7 @@ private fun PaymentPanel(s: OrderSnapshot, modifier: Modifier, onBack: () -> Uni
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1.2f).fillMaxHeight().clip(RoundedCornerShape(8.dp)).background(Color.White).padding(8.dp)) {
-                Row { listOf("MOYEN" to 1.4f, "MONTANT" to 1f, "REÇU" to 1f, "RENDU" to 1f).forEach { (h, w) -> Text(h, Modifier.weight(w), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Muted) } }
+                Row { listOf("TYPE" to 1.4f, "MONTANT" to 1f, "REÇU" to 1f, "RENDU" to 1f).forEach { (h, w) -> Text(h, Modifier.weight(w), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Muted) } }
                 HorizontalDivider()
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     s.payments.forEach { p ->
@@ -526,13 +617,11 @@ private fun PaymentPanel(s: OrderSnapshot, modifier: Modifier, onBack: () -> Uni
             }
         }
         Row(Modifier.fillMaxWidth().weight(1f)) {
-            // Fonctions d'encaissement réellement disponibles
-            Column(Modifier.width(128.dp).fillMaxHeight().clip(RoundedCornerShape(8.dp)).background(Navy).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                FunctionButton("%", Color(0xFF2BA6C9), "Remise note %", onClick = onDiscount)
-                FunctionButton("≡", Accent, "Imprimer la note", onClick = vm::printNote)
+            Column(Modifier.width(118.dp).fillMaxHeight().clip(RoundedCornerShape(8.dp)).background(Navy).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FunctionButton("%", Color(0xFF1FB5A8), "Remise note %", onClick = onDiscount)
+                FunctionButton("≡", Color(0xFFF08A30), "Imprimer la note", onClick = vm::printNote)
             }
             Spacer(Modifier.width(8.dp))
-            // Pavé numérique
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(Modifier.weight(3f).fillMaxHeight().clip(RoundedCornerShape(8.dp)).background(Color.White).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterEnd) {
@@ -541,36 +630,36 @@ private fun PaymentPanel(s: OrderSnapshot, modifier: Modifier, onBack: () -> Uni
                     PadKey("⌫", Modifier.weight(1f).fillMaxHeight()) { entry = entry.dropLast(1) }
                 }
                 PadRow(listOf("10", "20", "50", "100")) { entry = it }
-                PadRow(listOf("7", "8", "9", "C")) { if (it == "C") entry = "" else type(it) }
-                PadRow(listOf("4", "5", "6", ",")) { type(it) }
-                PadRow(listOf("1", "2", "3", "0")) { type(it) }
+                PadRow(listOf("7", "8", "9", "C")) { entry = if (it == "C") "" else typeAmount(entry, it) }
+                PadRow(listOf("4", "5", "6", ",")) { entry = typeAmount(entry, it) }
+                PadRow(listOf("1", "2", "3", "0")) { entry = typeAmount(entry, it) }
             }
             Spacer(Modifier.width(8.dp))
-            // Moyens de paiement, identifiés par couleur
-            Column(Modifier.width(180.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Six moyens de paiement, chacun sa couleur
+            Column(Modifier.width(176.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 val ok = amount != null
+                val notAbove = ok && amount!! <= rest
                 PayButton("ESPÈCES", PayCash, ok) { vm.pay(PaymentMethod.CASH, amount!!); entry = "" }
-                PayButton("CARTE", PayCard, ok && amount!! <= rest) { vm.pay(PaymentMethod.CARD, amount!!); entry = "" }
-                PayButton("TITRE-RESTO", PayVoucher, ok && amount!! <= rest) { vm.pay(PaymentMethod.MEAL_VOUCHER, amount!!); entry = "" }
-                Text("Carte : montant validé sur le TPE autonome (TPE intégré : phase ultérieure).", fontSize = 10.sp, color = Muted)
+                PayButton("CARTE", PayCard, notAbove) { vm.pay(PaymentMethod.CARD, amount!!); entry = "" }
+                PayButton("CHÈQUE", Color(0xFFE5C100), notAbove) { vm.pay(PaymentMethod.CHEQUE, amount!!); entry = "" }
+                PayButton("TITRE-RESTO", PayVoucher, notAbove) { vm.pay(PaymentMethod.MEAL_VOUCHER, amount!!); entry = "" }
+                PayButton("CHÈQUE-VACANCES", Color(0xFFE0603A), notAbove) { vm.pay(PaymentMethod.HOLIDAY_VOUCHER, amount!!); entry = "" }
+                Text("Carte : montant validé sur le TPE autonome.", fontSize = 10.sp, color = Muted)
             }
         }
     }
 }
 
 @Composable
-private fun RowScopePadKeys(keys: List<String>, scope: RowScope, onKey: (String) -> Unit) = with(scope) {
-    keys.forEach { k -> PadKey(k, Modifier.weight(1f).fillMaxHeight(), fontSize = 24.sp) { onKey(k) } }
-}
-
-@Composable
 private fun androidx.compose.foundation.layout.ColumnScope.PadRow(keys: List<String>, onKey: (String) -> Unit) {
-    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) { RowScopePadKeys(keys, this, onKey) }
+    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        keys.forEach { k -> PadKey(k, Modifier.weight(1f).fillMaxHeight(), fontSize = 24.sp) { onKey(k) } }
+    }
 }
 
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.PayButton(label: String, color: Color, enabled: Boolean, onClick: () -> Unit) {
-    PadKey(label, Modifier.fillMaxWidth().weight(1f), color = color, textColor = Color.White, fontSize = 20.sp, enabled = enabled, onClick = onClick)
+    PadKey(label, Modifier.fillMaxWidth().weight(1f), color = color, textColor = Color.White, fontSize = 16.sp, enabled = enabled, onClick = onClick)
 }
 
 // ---------------------------------------------------------------- Tickets et clôtures

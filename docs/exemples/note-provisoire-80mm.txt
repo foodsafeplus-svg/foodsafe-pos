@@ -1,0 +1,26 @@
+           *** TICKET PROVISOIRE ***
+          Ne vaut pas ticket de caisse
+                 PIZZERIA TEST
+                1 rue de la Paix
+                  75002 Paris
+              SIRET 12345678900011
+               TVA FR00123456789
+------------------------------------------------
+TABLE 43
+1 x Salade César                            9,50
+   remise                                  -0,95
+1 x Pizza Margherita                       12,00
+   remise                                  -1,20
+1 x Bière pression                          6,00
+   remise                                  -0,60
+------------------------------------------------
+TOTAL TTC                                24,75 €
+------------------------------------------------
+Carte (TPE)                              15,00 €
+RESTE À PAYER                             9,75 €
+------------------------------------------------
+Note n° T01-N-000001
+14/11/2023 23:13:41
+Terminal T01
+Empreinte b3217a70ccbb
+FOODSAFE+ POS 0.2.0

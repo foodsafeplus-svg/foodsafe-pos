@@ -32,4 +32,28 @@ interface PosDao {
     @Query("SELECT * FROM journal_events ORDER BY seq DESC LIMIT 1") fun lastJournal(): JournalEventEntity?
     @Query("SELECT * FROM journal_events ORDER BY seq") fun allJournal(): List<JournalEventEntity>
     @Query("SELECT * FROM journal_events ORDER BY seq DESC LIMIT 200") fun observeJournal(): Flow<List<JournalEventEntity>>
+
+    @Query("SELECT * FROM orders WHERE status IN ('OPEN','ON_HOLD') ORDER BY tableNumber")
+    fun observeOpenOrders(): Flow<List<OrderEntity>>
+    @Query("SELECT * FROM order_lines WHERE orderId IN (SELECT id FROM orders WHERE status IN ('OPEN','ON_HOLD'))")
+    fun observeOpenLines(): Flow<List<OrderLineEntity>>
+
+    @Query("SELECT tableNumber FROM orders WHERE status IN ('OPEN','ON_HOLD') AND tableNumber IS NOT NULL")
+    fun allOpenOrderTables(): List<String>
+
+    @Query("SELECT * FROM employees WHERE active = 1") fun employees(): List<EmployeeEntity>
+    @Query("SELECT * FROM employees WHERE id = :id") fun employee(id: String): EmployeeEntity?
+    @Insert(onConflict = OnConflictStrategy.IGNORE) fun insertEmployees(e: List<EmployeeEntity>)
+
+    @Insert fun insertFiscal(d: FiscalDocumentEntity)
+    @Query("SELECT * FROM fiscal_documents WHERE terminalId = :terminalId AND type = :type ORDER BY number DESC LIMIT 1")
+    fun lastFiscal(terminalId: String, type: String): FiscalDocumentEntity?
+    @Query("SELECT * FROM fiscal_documents WHERE terminalId = :terminalId AND type = :type ORDER BY number")
+    fun fiscalOfType(terminalId: String, type: String): List<FiscalDocumentEntity>
+    @Query("SELECT * FROM fiscal_documents WHERE id = :id") fun fiscal(id: String): FiscalDocumentEntity?
+    @Query("SELECT * FROM fiscal_documents ORDER BY issuedAt DESC, number DESC LIMIT 200")
+    fun observeFiscal(): Flow<List<FiscalDocumentEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE) fun insertKey(k: FiscalKeyEntity)
+    @Query("SELECT * FROM fiscal_keys") fun keys(): List<FiscalKeyEntity>
 }

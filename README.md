@@ -9,13 +9,17 @@ Logiciel d'encaissement Android (Kotlin, Jetpack Compose, Room) conçu pour vise
 |---|---|
 | [A. Besoins et ambiguïtés](docs/A-besoins-et-ambiguites.md) | [B. Architecture et flux](docs/B-architecture.md) |
 | [C. Modèle de données](docs/C-modele-de-donnees.md) | [D. Parcours UX et écrans](docs/D-parcours-ux-et-ecrans.md) |
-| [E. Roadmap et critères d'acceptation](docs/E-roadmap.md) | [G. État réel de l'incrément 1](docs/G-etat-increment-1.md) |
+| [E. Roadmap et critères d'acceptation](docs/E-roadmap.md) | [G. État de l'incrément 1](docs/G-etat-increment-1.md) |
+| [G. État de l'incrément 2 (ticket fiscal, Z, PIN)](docs/G-etat-increment-2.md) | [Exemples de tickets](docs/exemples/) |
+
+**Démo :** au premier lancement, deux comptes fictifs sont créés : Marie (serveuse) PIN `1111`, Paul (responsable) PIN `9999`.
 
 ## Structure
 
 ```
 core/   Kotlin/JVM pur : argent, TVA, remises, commandes, niveaux, envois cuisine, divisions,
-        paiements, attribution espèces, journal chaîné + signature (aucune dépendance Android)
+        paiements, attribution espèces, journal chaîné, documents fiscaux signés, X/Z,
+        PIN et droits (aucune dépendance Android)
 app/    Application Android : Compose, Room (triggers append-only), dépôt transactionnel
 scripts/ build-apk.sh, create-release-keystore.sh
 ```
@@ -30,7 +34,7 @@ scripts/ build-apk.sh, create-release-keystore.sh
 
 ```bash
 ./gradlew :core:test                 # tests du cœur métier (sans SDK Android)
-./gradlew :app:testDebugUnitTest     # tests Room + parcours UI (Robolectric), produit docs/captures/*.png
+./gradlew :app:testDebugUnitTest     # tests Room + parcours UI (Robolectric) : docs/captures/*.png, docs/exemples/*.txt
 ./gradlew :app:assembleDebug         # APK debug -> app/build/outputs/apk/debug/app-debug.apk
 scripts/build-apk.sh debug           # tests + APK debug + empreinte SHA-256
 ```

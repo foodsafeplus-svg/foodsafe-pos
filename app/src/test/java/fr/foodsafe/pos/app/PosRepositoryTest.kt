@@ -7,6 +7,8 @@ import androidx.test.core.app.ApplicationProvider
 import fr.foodsafe.pos.app.data.DemoCatalog
 import fr.foodsafe.pos.app.data.PosDatabase
 import fr.foodsafe.pos.app.data.PosRepository
+import fr.foodsafe.pos.app.data.SoftwareKeyProvider
+import fr.foodsafe.pos.app.data.ApprovalRequired
 import fr.foodsafe.pos.core.discount.TicketDiscount
 import fr.foodsafe.pos.core.journal.ChainVerification
 import fr.foodsafe.pos.core.money.BasisPoints
@@ -40,7 +42,8 @@ class PosRepositoryTest {
             .allowMainThreadQueries()
             .addCallback(PosDatabase.APPEND_ONLY_CALLBACK)
             .build()
-        repo = PosRepository(db, "ETAB", "T01", clock = { clock++ })
+        repo = PosRepository(db, TestFixtures.establishment, "T01", SoftwareKeyProvider("T01"), clock = { clock++ })
+        repo.bootstrap()
     }
 
     @After fun tearDown() = db.close()
@@ -108,12 +111,13 @@ class PosRepositoryTest {
         repo.sendToKitchen(o, "marie", "b")
         val lineId = repo.snapshot(o)!!.order.lines.single().id
         try { repo.cancelLine(o, "marie", lineId, " ", "c"); fail("motif vide accepté") } catch (_: IllegalArgumentException) {}
-        repo.cancelLine(o, "marie", lineId, "Client parti", "d")
+        try { repo.cancelLine(o, "marie", lineId, "Client parti", "d"); fail("serveur sans validation") } catch (_: ApprovalRequired) {}
+        repo.cancelLine(o, "marie", lineId, "Client parti", "d", approverId = "paul")
         val t = runBlocking { repo.tickets.first() }.first()
         assertEquals("CANCELLATION", t.kind)
         assertTrue(t.inverse)
         assertTrue(!t.renderedText.contains("Client parti"))
-        assertEquals("Client parti", db.dao().allJournal().last().reason)
+        assertEquals("Client parti · validé par Paul", db.dao().allJournal().last().reason)
     }
 
     @Test fun triggersInterdisentModificationJournalEtPaiements() {

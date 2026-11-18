@@ -1,7 +1,7 @@
 package fr.foodsafe.pos.app
 
 import android.app.Application
-import fr.foodsafe.pos.app.data.AndroidKeystoreKeyProvider
+import fr.foodsafe.pos.app.data.fiscalKeyProvider
 import fr.foodsafe.pos.app.data.FiscalKeyProvider
 import fr.foodsafe.pos.app.data.PosDatabase
 import fr.foodsafe.pos.app.data.PosRepository
@@ -26,6 +26,9 @@ open class PosApplication : Application() {
         PosRepository(PosDatabase.build(this), establishment, terminalId = "T01", keys = keyProvider())
     }
 
-    /** Clé de signature fiscale : Android Keystore sur l'appareil (surchargée uniquement dans les tests). */
-    protected open fun keyProvider(): FiscalKeyProvider = AndroidKeystoreKeyProvider("T01")
+    /**
+     * Clé de signature fiscale : Android Keystore sur l'appareil, ou clé logicielle si le Keystore du terminal
+     * est défaillant (surchargée uniquement dans les tests).
+     */
+    protected open fun keyProvider(): FiscalKeyProvider = fiscalKeyProvider("T01", filesDir)
 }

@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -111,6 +112,39 @@ class OrderScreenUiTest {
     }
 
     /** Attente en temps réel : les écritures Room s'exécutent sur Dispatchers.IO. */
+    @Test fun menuAccueilCompteurEspecesCalculatrice() {
+        waitText("Saisissez votre code PIN")
+        pin("1111")
+        waitText("Nouvelle table")
+        rule.onNodeWithText("ACCUEIL").performClick()
+        waitText("COMPTEUR D'ESPÈCES")
+        capture("06-menu-accueil")
+
+        rule.onNodeWithText("COMPTEUR D'ESPÈCES").performClick()
+        waitText("Quantité")
+        // 2 × 2 €, 5 × 5 €, 25 × 0,20 €, 34 × 0,50 €, 5 × 10 € = 101,00 €
+        listOf("2" to "2 €", "5" to "5 €", "25" to "0,20 €", "34" to "0,50 €", "5" to "10 €").forEach { (q, d) ->
+            q.forEach { rule.onNodeWithTag("qte-$it").performClick() }
+            rule.onNodeWithText(d).performClick()
+        }
+        waitText("TOTAL : 101,00 €")
+        rule.onNodeWithText("10 €").performClick() // sans quantité : +1
+        waitText("TOTAL : 111,00 €")
+        rule.onNodeWithText("−").performClick()
+        waitText("TOTAL : 101,00 €")
+        capture("07-compteur-especes")
+        rule.onNodeWithText("Imprimer").performClick()
+        waitText("Comptage imprimé")
+
+        rule.onNodeWithText("ACCUEIL").performClick()
+        rule.onNodeWithText("CALCULATRICE").performClick()
+        waitText("Retour")
+        listOf("1", "2", "+", "3", "0", "=").forEach { rule.onNodeWithText(it).performClick() }
+        waitText("42")
+        rule.onNodeWithText("Retour").performClick()
+        waitText("COMPTEUR D'ESPÈCES")
+    }
+
     private fun waitText(text: String, substring: Boolean = false) {
         repeat(150) {
             rule.waitForIdle()

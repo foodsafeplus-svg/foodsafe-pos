@@ -259,6 +259,18 @@ class PosRepository(
         }
     }
 
+    /** Ouverture du tiroir sans vente : droit vérifié et inscrite au journal AVANT l'impulsion. */
+    fun openDrawer(actorId: String, approverId: String? = null) {
+        val approval = authorize(actorId, SensitiveAction.OPEN_DRAWER, 0, approverId)
+        db.runInTransaction { log(actorId, "DRAWER_OPENED", "drawer", terminalId, null, null, approval) }
+    }
+
+    /** Comptage des espèces (compteur) : non fiscal, mais tracé (total + détail). */
+    fun logCashCount(actorId: String, count: fr.foodsafe.pos.core.cash.CashCount) = db.runInTransaction {
+        val detail = count.lines.joinToString(";") { "${it.denomination.value}x${it.quantity}" }
+        log(actorId, "CASH_COUNTED", "drawer", terminalId, null, "total=${count.total.value};$detail")
+    }
+
     fun reportX(actorId: String): ClosureReport = db.runInTransaction<ClosureReport> {
         ledger.reportX(clock()).also { log(actorId, "REPORT_X", "closure", "-", null, "total=${it.total.value}") }
     }

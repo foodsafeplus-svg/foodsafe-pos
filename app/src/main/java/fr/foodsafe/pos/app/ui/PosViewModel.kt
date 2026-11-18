@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL }
+enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR }
 
 data class TableSummary(val orderId: String, val table: String, val ownerId: String, val status: OrderStatus, val total: Cents)
 
@@ -241,6 +241,16 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     fun duplicate(d: FiscalDocument) = act<FiscalDocument>("Duplicata émis", onSuccess = { showDocument(it, print = true) }) { _, a -> repo.duplicate(d.id, userId(), a) }
 
     fun dismissReceipt() { _state.value = _state.value.copy(receipt = null) }
+
+    // ---------- Menu Accueil ----------
+
+    fun openDrawer() = act<Unit>("Tiroir ouvert", onSuccess = { printLines(emptyList(), openDrawer = true) }) { _, a -> repo.openDrawer(userId(), a) }
+
+    fun printCashCount(count: fr.foodsafe.pos.core.cash.CashCount) = act<List<String>>("Comptage imprimé", onSuccess = { printLines(it) }) { _, _ ->
+        repo.logCashCount(userId(), count)
+        val now = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", java.util.Locale.FRANCE).format(java.util.Date())
+        count.render("COMPTAGE DES ESPÈCES", listOf(est.name.uppercase(), now, "Utilisateur : ${_state.value.user?.name}", "Terminal T01"))
+    }
 
     fun reportX() = act<List<String>>(onSuccess = { _state.value = _state.value.copy(receipt = ReceiptPreview("Rapport X", it)); printLines(it) }) { _, _ ->
         ReceiptRenderer.renderX(repo.reportX(userId()), est)

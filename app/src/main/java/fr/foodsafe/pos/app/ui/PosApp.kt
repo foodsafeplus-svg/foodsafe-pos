@@ -91,21 +91,21 @@ import java.util.Locale
 // Esprit « caisse de comptoir » : panneaux sombres, grosses touches bleu clair, tuiles produits colorées,
 // moyens de paiement identifiés par couleur. Couleurs et logo propres à FOODSAFE+.
 
-private val FsBlue = Color(0xFF1E4FC8)      // bleu de marque
-private val FsSky = Color(0xFF2F9BEF)       // le « + »
-private val Navy = Color(0xFF1C2230)        // panneaux de fonctions
-private val NavySoft = Color(0xFF2B3346)
-private val KeyBlue = Color(0xFFB4CAE8)     // touches du pavé
-private val TicketBg = Color(0xFFEDF1F7)    // fond de la note
-private val TileGreen = Color(0xFF9EDC8C)
-private val TileLavender = Color(0xFFB7C3EA)
-private val PayCash = Color(0xFF55C246)
-private val PayCard = Color(0xFF2357D9)
-private val PayVoucher = Color(0xFFF0922B)
-private val Accent = Color(0xFFD9468F)      // icônes de fonctions
-private val Brand = FsBlue
-private val Muted = Color(0xFF6B7280)
-private val Warn = Color(0xFFB45309)
+internal val FsBlue = Color(0xFF1E4FC8)      // bleu de marque
+internal val FsSky = Color(0xFF2F9BEF)       // le « + »
+internal val Navy = Color(0xFF1C2230)        // panneaux de fonctions
+internal val NavySoft = Color(0xFF2B3346)
+internal val KeyBlue = Color(0xFFB4CAE8)     // touches du pavé
+internal val TicketBg = Color(0xFFEDF1F7)    // fond de la note
+internal val TileGreen = Color(0xFF9EDC8C)
+internal val TileLavender = Color(0xFFB7C3EA)
+internal val PayCash = Color(0xFF55C246)
+internal val PayCard = Color(0xFF2357D9)
+internal val PayVoucher = Color(0xFFF0922B)
+internal val Accent = Color(0xFFD9468F)      // icônes de fonctions
+internal val Brand = FsBlue
+internal val Muted = Color(0xFF6B7280)
+internal val Warn = Color(0xFFB45309)
 
 @Composable
 fun PosApp(vm: PosViewModel = viewModel()) {
@@ -124,7 +124,7 @@ fun PosApp(vm: PosViewModel = viewModel()) {
                 if (state.user == null) LoginScreen(vm.establishmentName, state.loginError, vm::login) else MainScreen(state, vm)
                 // Notifications dans le bandeau du haut, entre les onglets et le nom de l'utilisateur (zone sans bouton) :
                 // jamais sur la note, le pavé, les produits ni les moyens de paiement.
-                SnackbarHost(snackbar, Modifier.align(Alignment.TopEnd).padding(end = 330.dp).fillMaxWidth(0.3f))
+                SnackbarHost(snackbar, Modifier.align(Alignment.TopEnd).padding(end = 300.dp).fillMaxWidth(0.2f))
             }
         }
         state.approval?.let { ApprovalDialog(it, vm::approve, vm::dismissApproval) }
@@ -133,7 +133,7 @@ fun PosApp(vm: PosViewModel = viewModel()) {
 }
 
 @Composable
-private fun Wordmark(size: TextUnit, color: Color = Color(0xFF151515)) {
+internal fun Wordmark(size: TextUnit, color: Color = Color(0xFF151515)) {
     Text(
         buildAnnotatedString {
             withStyle(SpanStyle(color = color)) { append("FOODSAFE") }
@@ -235,7 +235,7 @@ private fun LoginScreen(establishment: String, error: String?, onPin: (String) -
 }
 
 @Composable
-private fun PadKey(label: String, modifier: Modifier, color: Color = KeyBlue, textColor: Color = Navy, fontSize: TextUnit = 24.sp, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun PadKey(label: String, modifier: Modifier, color: Color = KeyBlue, textColor: Color = Navy, fontSize: TextUnit = 24.sp, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
         modifier.clip(RoundedCornerShape(8.dp)).background(if (enabled) color else color.copy(alpha = 0.4f)).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -250,17 +250,16 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Wordmark(20.sp, Color.White)
             Spacer(Modifier.width(16.dp))
-            val tabs = listOf(Screen.TABLES to "Tables", Screen.DOCUMENTS to "Tickets", Screen.CLOSURE to "Clôtures", Screen.KITCHEN to "Bons cuisine", Screen.JOURNAL to "Journal")
+            val tabs = listOf(Screen.HOME to "Accueil", Screen.TABLES to "Tables", Screen.DOCUMENTS to "Tickets", Screen.CLOSURE to "Clôtures", Screen.KITCHEN to "Bons cuisine", Screen.JOURNAL to "Journal")
             tabs.forEach { (screen, label) ->
-                val selected = state.screen == screen || (screen == Screen.TABLES && state.screen == Screen.ORDER)
+                val selected = state.screen == screen || (screen == Screen.TABLES && state.screen == Screen.ORDER) ||
+                    (screen == Screen.HOME && state.screen in setOf(Screen.CASH_COUNT, Screen.CALCULATOR))
                 Box(
                     Modifier.padding(horizontal = 3.dp).clip(RoundedCornerShape(6.dp)).background(if (selected) FsBlue else NavySoft)
-                        .clickable { if (screen == Screen.TABLES) vm.backToTables() else vm.show(screen) }.padding(horizontal = 14.dp, vertical = 9.dp),
+                        .clickable { if (screen == Screen.TABLES) vm.backToTables() else vm.show(screen) }.padding(horizontal = 11.dp, vertical = 9.dp),
                 ) { Text(label.uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             }
             Spacer(Modifier.weight(1f))
-            Text(vm.establishmentName, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
-            Spacer(Modifier.width(16.dp))
             Text("${state.user!!.name} · ${roleLabel(state.user)} · T01", color = Color.White, fontSize = 13.sp)
             Spacer(Modifier.width(8.dp))
             Box(Modifier.clip(RoundedCornerShape(6.dp)).background(Color(0xFFB23B3B)).clickable { vm.logout() }.padding(horizontal = 12.dp, vertical = 9.dp)) {
@@ -275,6 +274,9 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
                 Screen.CLOSURE -> ClosureScreen(vm)
                 Screen.KITCHEN -> KitchenScreen(vm)
                 Screen.JOURNAL -> JournalScreen(vm, state.integrity)
+                Screen.HOME -> HomeMenuScreen(vm)
+                Screen.CASH_COUNT -> CashCountScreen(vm)
+                Screen.CALCULATOR -> CalculatorScreen(vm)
             }
         }
     }

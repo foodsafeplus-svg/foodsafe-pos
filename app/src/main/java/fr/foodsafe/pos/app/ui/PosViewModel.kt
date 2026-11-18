@@ -61,6 +61,7 @@ data class UiState(
 class PosViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = (app as PosApplication).repository
     private val est = repo.establishment
+    val establishmentName: String get() = est.name
 
     /** Déconnexion après 2 min d'inactivité (paramétrable par établissement en phase 2). */
     val sessionPolicy = SessionPolicy(inactivityTimeoutMs = 120_000)

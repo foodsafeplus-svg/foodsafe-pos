@@ -2,6 +2,8 @@ package fr.foodsafe.pos.app
 
 import android.app.Application
 import fr.foodsafe.pos.app.data.fiscalKeyProvider
+import fr.foodsafe.pos.app.hardware.TicketPrinter
+import fr.foodsafe.pos.app.hardware.UsbEscPosPrinter
 import fr.foodsafe.pos.app.data.FiscalKeyProvider
 import fr.foodsafe.pos.app.data.PosDatabase
 import fr.foodsafe.pos.app.data.PosRepository
@@ -21,6 +23,10 @@ open class PosApplication : Application() {
         super.onCreate()
         CrashReport.install(this)
     }
+
+    /** Imprimante de tickets intégrée (ESC/POS en USB). */
+    val printer: TicketPrinter by lazy { createPrinter() }
+    protected open fun createPrinter(): TicketPrinter = UsbEscPosPrinter(this)
 
     val repository by lazy {
         PosRepository(PosDatabase.build(this), establishment, terminalId = "T01", keys = keyProvider())

@@ -62,6 +62,7 @@ import java.util.Locale
  */
 class HardwareTestActivity : ComponentActivity() {
     private val log = mutableStateListOf<String>()
+    private val printer by lazy { UsbEscPosPrinter(this) }
     private var presentation: Presentation? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -106,6 +107,20 @@ class HardwareTestActivity : ComponentActivity() {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { scope.launch { printUsb(usb, d, EscPos.testTicket("USB ${d.vendorId}:${d.productId}")) } }) { Text("Imprimer un test") }
                         OutlinedButton(onClick = { scope.launch { printUsb(usb, d, EscPos.displayText("FOODSAFE+", "Test afficheur")) } }) { Text("Tester afficheur") }
+                    }
+                }
+
+                Section("1 bis. Accents sur les tickets")
+                var cp by remember { mutableStateOf(printer.codePage) }
+                Text("Codage utilisé : ${cp.label}. Imprimez le test, puis choisissez la ligne où les accents et € sont corrects.")
+                Button(onClick = { scope.launch {
+                    val err = withContext(Dispatchers.IO) { printer.printBytes(printer.accentTest()) }
+                    note("Test des accents : " + (err ?: "OK"))
+                } }) { Text("Imprimer le test des accents") }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CodePage.entries.forEach { c ->
+                        val chosen = c == cp
+                        (if (chosen) Button(onClick = {}) { Text("✓ ${c.label}") } else OutlinedButton(onClick = { printer.codePage = c; cp = c; note("Codage choisi : ${c.label}") }) { Text(c.label) })
                     }
                 }
 
@@ -169,28 +184,9 @@ class HardwareTestActivity : ComponentActivity() {
             note("USB ${d.vendorId}:${d.productId} : autorisez l'accès dans la fenêtre Android, puis appuyez à nouveau.")
             return
         }
-        val result = withContext(Dispatchers.IO) {
-            runCatching {
-                val itf = (0 until d.interfaceCount).map { d.getInterface(it) }
-                    .sortedByDescending { it.interfaceClass == UsbConstants.USB_CLASS_PRINTER }
-                    .firstOrNull { i -> (0 until i.endpointCount).any { i.getEndpoint(it).let { e -> e.type == UsbConstants.USB_ENDPOINT_XFER_BULK && e.direction == UsbConstants.USB_DIR_OUT } } }
-                    ?: error("aucune sortie de données (bulk OUT) sur ce périphérique")
-                val ep = (0 until itf.endpointCount).map { itf.getEndpoint(it) }
-                    .first { it.type == UsbConstants.USB_ENDPOINT_XFER_BULK && it.direction == UsbConstants.USB_DIR_OUT }
-                val conn = usb.openDevice(d) ?: error("ouverture refusée")
-                try {
-                    check(conn.claimInterface(itf, true)) { "interface occupée" }
-                    var off = 0
-                    while (off < data.size) {
-                        val n = conn.bulkTransfer(ep, data.copyOfRange(off, minOf(off + 4096, data.size)), minOf(4096, data.size - off), 3000)
-                        check(n > 0) { "envoi refusé (code $n)" }
-                        off += n
-                    }
-                    "OK, ${data.size} octets envoyés (interface classe ${itf.interfaceClass})"
-                } finally { conn.close() }
-            }
-        }
-        note("USB ${d.vendorId}:${d.productId} : " + result.fold({ it }, { "ÉCHEC ${it.message}" }))
+        val err = withContext(Dispatchers.IO) { UsbEscPosPrinter.send(usb, d, data) }
+        if (err == null) printer.remember(d)
+        note("USB ${d.vendorId}:${d.productId} : " + (err ?: "OK, ${data.size} octets envoyés (imprimante mémorisée pour les tickets)"))
     }
 
     private suspend fun printSerial(f: File, baud: Int, data: ByteArray) {

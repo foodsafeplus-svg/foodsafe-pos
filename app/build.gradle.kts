@@ -20,8 +20,8 @@ android {
         applicationId = "fr.foodsafe.pos"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.3.4-test-materiel"
+        versionCode = 8
+        versionName = "0.4.0-impression"
     }
 
     signingConfigs {

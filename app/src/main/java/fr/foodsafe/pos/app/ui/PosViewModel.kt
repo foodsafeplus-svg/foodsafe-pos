@@ -60,6 +60,15 @@ data class UiState(
 
 class PosViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = (app as PosApplication).repository
+    private val printer = (app as PosApplication).printer
+
+    /** Impression hors du thread UI ; une erreur s'affiche dans le bandeau sans bloquer la vente. */
+    private fun printLines(lines: List<String>, openDrawer: Boolean = false) {
+        viewModelScope.launch {
+            val err = withContext(Dispatchers.IO) { runCatching { printer.print(lines, openDrawer) }.getOrElse { "Impression impossible : ${it.message}" } }
+            if (err != null) _state.value = _state.value.copy(message = err)
+        }
+    }
     private val est = repo.establishment
     val establishmentName: String get() = est.name
 
@@ -204,31 +213,40 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
 
     fun pay(method: PaymentMethod, amount: Cents) = act<OrderSnapshot>(onSuccess = { s ->
         update(s)
-        s.ticket?.let { showDocument(it) }
+        if (method.isCash && s.ticket == null) printLines(emptyList(), openDrawer = true)
+        s.ticket?.let { showDocument(it, print = true, openDrawer = s.ticket.payments.any { p -> p.method.isCash }) }
     }) { k, _ -> repo.pay(orderId(), userId(), method, amount, k) }
 
-    fun printNote() = act<FiscalDocument>(onSuccess = { showDocument(it) }) { _, _ -> repo.printProvisionalNote(orderId(), userId()) }
+    fun printNote() = act<FiscalDocument>(onSuccess = { showDocument(it, print = true) }) { _, _ -> repo.printProvisionalNote(orderId(), userId()) }
 
     // ---------- Documents ----------
 
-    fun showDocument(d: FiscalDocument) {
+    /**
+     * Affiche un document. print = true seulement au moment où il est émis (ticket, note, duplicata, Z) :
+     * le revoir depuis une liste ne le réimprime pas, une réimpression passe par un DUPLICATA numéroté.
+     */
+    fun showDocument(d: FiscalDocument, print: Boolean = false, openDrawer: Boolean = false) {
         val remaining = _state.value.snapshot?.takeIf { it.order.id == d.orderId }?.remaining
-        _state.value = _state.value.copy(receipt = ReceiptPreview(d.numberLabel, ReceiptRenderer.render(d, est, remaining = remaining), d))
+        val lines = ReceiptRenderer.render(d, est, remaining = remaining)
+        _state.value = _state.value.copy(receipt = ReceiptPreview(d.numberLabel, lines, d))
+        if (print) printLines(lines, openDrawer)
     }
 
     fun showGift(d: FiscalDocument) {
-        _state.value = _state.value.copy(receipt = ReceiptPreview("Ticket cadeau", ReceiptRenderer.renderGift(d, est), d, gift = true))
+        val lines = ReceiptRenderer.renderGift(d, est)
+        _state.value = _state.value.copy(receipt = ReceiptPreview("Ticket cadeau", lines, d, gift = true))
+        printLines(lines)
     }
 
-    fun duplicate(d: FiscalDocument) = act<FiscalDocument>("Duplicata émis", onSuccess = { showDocument(it) }) { _, a -> repo.duplicate(d.id, userId(), a) }
+    fun duplicate(d: FiscalDocument) = act<FiscalDocument>("Duplicata émis", onSuccess = { showDocument(it, print = true) }) { _, a -> repo.duplicate(d.id, userId(), a) }
 
     fun dismissReceipt() { _state.value = _state.value.copy(receipt = null) }
 
-    fun reportX() = act<List<String>>(onSuccess = { _state.value = _state.value.copy(receipt = ReceiptPreview("Rapport X", it)) }) { _, _ ->
+    fun reportX() = act<List<String>>(onSuccess = { _state.value = _state.value.copy(receipt = ReceiptPreview("Rapport X", it)); printLines(it) }) { _, _ ->
         ReceiptRenderer.renderX(repo.reportX(userId()), est)
     }
 
-    fun closeZ() = act<FiscalDocument>("Clôture Z enregistrée", onSuccess = { showDocument(it) }) { _, a -> repo.closeZ(userId(), a) }
+    fun closeZ() = act<FiscalDocument>("Clôture Z enregistrée", onSuccess = { showDocument(it, print = true) }) { _, a -> repo.closeZ(userId(), a) }
 
     fun verifyAll() = act<PosRepository.IntegrityReport>(onSuccess = { _state.value = _state.value.copy(integrity = it) }) { _, _ -> repo.verifyAll() }
 

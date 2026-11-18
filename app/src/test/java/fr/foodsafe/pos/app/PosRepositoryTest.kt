@@ -50,6 +50,26 @@ class PosRepositoryTest {
 
     private fun ticketCount(orderId: String) = db.dao().ticketCount(orderId)
 
+    @Test fun catalogueReserveAuResponsableEtChangementDePrixJournalise() {
+        val salade = p.getValue("salade")
+        try { repo.catalog.saveProduct("marie", salade.copy(price = Cents(1)) ); fail("une serveuse ne modifie pas le catalogue") }
+        catch (e: fr.foodsafe.pos.app.data.ActionDenied) { /* attendu */ }
+
+        // Une note ouverte avant le changement garde l'ancien prix sur sa ligne.
+        val o = repo.openOrder("marie", "12").order.id
+        repo.addProduct(o, "marie", salade, null, "a1")
+        repo.catalog.saveProduct("paul", salade.copy(price = Cents(1050)))
+        val changed = runBlocking { repo.catalog.state.first() }.products.first { it.id == "salade" }
+        assertEquals(Cents(1050), changed.price)
+        assertEquals(Cents(950), repo.snapshot(o)!!.order.lines.single().unitPriceTtc)
+
+        val events = db.dao().allJournal()
+        val upd = events.last { it.type == "PRODUCT_UPDATED" }
+        assertTrue(upd.before_json!!.contains("\"priceCents\":950"))
+        assertTrue(upd.after_json!!.contains("\"priceCents\":1050"))
+        assertTrue(repo.verifyJournal() is ChainVerification.Valid)
+    }
+
     @Test fun parcoursCompletPersisteEtJournalIntegre() {
         val o = repo.openOrder("marie", "43").order.id
         repo.addProduct(o, "marie", p.getValue("salade"), null, "k1")

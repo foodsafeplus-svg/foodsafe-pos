@@ -47,7 +47,7 @@ import java.math.RoundingMode
 
 // ---------------------------------------------------------------- Menu Accueil
 
-private data class HomeTile(val label: String, val glyph: String, val color: Color, val enabled: Boolean = true, val onClick: () -> Unit = {})
+private data class HomeTile(val label: String, val glyph: String, val color: Color, val enabled: Boolean = true, val note: String = "bientôt", val onClick: () -> Unit = {})
 
 /** Menu Accueil en tuiles (cahier des fonctions § 2). Les tuiles grisées arrivent dans les étapes suivantes. */
 @Composable
@@ -60,7 +60,7 @@ internal fun HomeMenuScreen(vm: PosViewModel) {
         HomeTile("Compteur d'espèces", "∑", Color(0xFF3F7FE0)) { vm.show(Screen.CASH_COUNT) },
         HomeTile("Écrans de préparation", "≡", Color(0xFF26A0DA)) { vm.show(Screen.KITCHEN) },
         HomeTile("Ouvrir le tiroir", "⇲", Color(0xFF26A69A)) { vm.openDrawer() },
-        HomeTile("Produits et claviers", "P", Color(0xFFF2B01E), enabled = false),
+        HomeTile("Produits et claviers", "P", Color(0xFFF2B01E), enabled = vm.isManager, note = "responsable") { vm.show(Screen.CATALOG) },
         HomeTile("Statistiques", "S", Color(0xFF43A047), enabled = false),
         HomeTile("Stock", "K", Color(0xFFE8C51A), enabled = false),
         HomeTile("Tous les rapports Z", "Z", Color(0xFF5C6BC0)) { vm.show(Screen.CLOSURE) },
@@ -85,7 +85,7 @@ internal fun HomeMenuScreen(vm: PosViewModel) {
                     ) { Text(t.glyph, fontSize = 34.sp, fontWeight = FontWeight.Black, color = Color.White) }
                     Text(t.label.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                         color = if (t.enabled) Navy else Muted, modifier = Modifier.padding(top = 6.dp))
-                    if (!t.enabled) Text("bientôt", fontSize = 11.sp, color = Muted)
+                    if (!t.enabled) Text(t.note, fontSize = 11.sp, color = Muted)
                 }
             }
         }

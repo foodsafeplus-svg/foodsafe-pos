@@ -12,11 +12,15 @@ data class Product(
     val vat: BasisPoints,
     val destination: String,
     val defaultLevel: ServiceLevel,
-    /** Famille affichée en onglet sur l'écran de prise de commande. */
+    /** Catégorie (rangement et statistiques) ; la page du clavier est indépendante. */
     val category: String = "Divers",
+    val subCategory: String? = null,
+    val imageId: String? = null,
+    val color: Int? = null,
+    val active: Boolean = true,
 )
 
-/** SIMULÉ : catalogue de démonstration codé en dur (le catalogue éditable arrive en phase 1). */
+/** Catalogue de démonstration : copié en base au premier lancement, puis modifiable dans « Produits et claviers ». */
 object DemoCatalog {
     /** Deux rangées de quatre onglets, comme sur les caisses de comptoir. */
     val categories = listOf("Entrées", "Pizzas", "Pâtes", "Desserts", "Glaces", "Softs", "Alcools", "Cafés")

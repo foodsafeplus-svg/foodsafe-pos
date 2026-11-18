@@ -78,6 +78,7 @@ enum class SensitiveAction(val label: String) {
     Z_CLOSURE("Clôture Z"),
     REFUND("Remboursement"),
     OPEN_DRAWER("Ouvrir le tiroir sans vente"),
+    EDIT_CATALOG("Modifier les produits et claviers"),
 }
 
 sealed interface Policy {
@@ -126,6 +127,7 @@ class PermissionPolicy(private val rules: Map<Pair<Role, SensitiveAction>, Polic
                 (Role.SERVER to SensitiveAction.REFUND) to Policy.Forbidden,
                 (Role.MANAGER to SensitiveAction.REFUND) to Policy.AlwaysValidate,
                 (Role.SERVER to SensitiveAction.OPEN_DRAWER) to Policy.ManagerPin,
+                (Role.SERVER to SensitiveAction.EDIT_CATALOG) to Policy.Forbidden,
             ),
         )
     }

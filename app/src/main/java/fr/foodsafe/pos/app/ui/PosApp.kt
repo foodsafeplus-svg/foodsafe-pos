@@ -65,7 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import fr.foodsafe.pos.app.data.DemoCatalog
+import fr.foodsafe.pos.app.data.KeyboardCell
 import fr.foodsafe.pos.app.data.JournalEventEntity
 import fr.foodsafe.pos.app.data.KitchenTicketEntity
 import fr.foodsafe.pos.app.data.OrderSnapshot
@@ -253,7 +253,7 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
             val tabs = listOf(Screen.HOME to "Accueil", Screen.TABLES to "Tables", Screen.DOCUMENTS to "Tickets", Screen.CLOSURE to "Clôtures", Screen.KITCHEN to "Bons cuisine", Screen.JOURNAL to "Journal")
             tabs.forEach { (screen, label) ->
                 val selected = state.screen == screen || (screen == Screen.TABLES && state.screen == Screen.ORDER) ||
-                    (screen == Screen.HOME && state.screen in setOf(Screen.CASH_COUNT, Screen.CALCULATOR))
+                    (screen == Screen.HOME && state.screen in setOf(Screen.CASH_COUNT, Screen.CALCULATOR, Screen.CATALOG, Screen.KEYBOARDS, Screen.PRODUCTS))
                 Box(
                     Modifier.padding(horizontal = 3.dp).clip(RoundedCornerShape(6.dp)).background(if (selected) FsBlue else NavySoft)
                         .clickable { if (screen == Screen.TABLES) vm.backToTables() else vm.show(screen) }.padding(horizontal = 11.dp, vertical = 9.dp),
@@ -277,6 +277,9 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
                 Screen.HOME -> HomeMenuScreen(vm)
                 Screen.CASH_COUNT -> CashCountScreen(vm)
                 Screen.CALCULATOR -> CalculatorScreen(vm)
+                Screen.CATALOG -> CatalogHubScreen(vm)
+                Screen.KEYBOARDS -> KeyboardsScreen(vm)
+                Screen.PRODUCTS -> ProductsScreen(vm)
             }
         }
     }
@@ -523,7 +526,7 @@ private fun FunctionButton(icon: String, iconColor: Color, label: String, enable
 }
 
 /** Couleurs de tuiles par famille : deux teintes alternées par rangée (comme petite / grande taille). */
-private val FamilyTiles = mapOf(
+internal val FamilyTiles = mapOf(
     "Entrées" to (Color(0xFF9EDC8C) to Color(0xFFC8CCD2)),
     "Pizzas" to (Color(0xFF9EDC8C) to Color(0xFFB7C3EA)),
     "Pâtes" to (Color(0xFFD9A066) to Color(0xFFE8C88E)),
@@ -536,43 +539,77 @@ private val FamilyTiles = mapOf(
 
 @Composable
 private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: Modifier, vm: PosViewModel) {
-    var category by remember { mutableStateOf(DemoCatalog.categories.first()) }
+    val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val keyboardId by vm.keyboardId.collectAsStateWithLifecycle()
+    val pageId by vm.page.collectAsStateWithLifecycle()
+    val keyboard = catalog?.keyboard(keyboardId)
+    val tabs = keyboard?.visiblePages.orEmpty()
+    val page = keyboard?.pages?.firstOrNull { it.id == pageId } ?: tabs.firstOrNull()
     Column(modifier.fillMaxHeight().background(Color.White).padding(6.dp)) {
-        // Familles : deux rangées de quatre onglets, gris et noir en alternance, l'onglet actif en bleu
-        DemoCatalog.categories.chunked(4).forEachIndexed { r, row ->
+        // Pages visibles : rangées de quatre onglets, gris et noir en alternance, l'onglet actif en bleu
+        tabs.chunked(4).forEachIndexed { r, row ->
             Row(Modifier.padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                row.forEachIndexed { i, c ->
+                row.forEachIndexed { i, pg ->
                     val base = if ((r + i) % 2 == 0) Color(0xFF6E737C) else Color(0xFF111418)
                     Box(
-                        Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(4.dp)).background(if (c == category) FsBlue else base).clickable { category = c },
+                        Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(4.dp)).background(if (pg.id == page?.id) FsBlue else base).clickable { vm.selectTab(pg.id) },
                         contentAlignment = Alignment.Center,
-                    ) { Text(c.uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    ) { Text(pg.name.uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1) }
                 }
                 repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        // Niveau d'envoi des prochains articles
+        // Niveau d'envoi des prochains articles (et retour depuis une page cachée)
         Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (page != null && !page.visible) {
+                PadKey("← ${page.name}", Modifier.height(32.dp).width(170.dp), color = NavySoft, textColor = Color.White, fontSize = 13.sp) { vm.pageBack() }
+            }
             LevelChip("Niveau produit", selectedLevel == null) { vm.selectLevel(null) }
             (0..3).forEach { l -> ServiceLevel(l).let { lvl -> LevelChip(lvl.label, selectedLevel == lvl) { vm.selectLevel(lvl) } } }
         }
-        val products = DemoCatalog.products.filter { it.category == category }
-        val (c1, c2) = FamilyTiles[category] ?: (TileGreen to TileLavender)
-        // Grille fixe de 5 colonnes ; les cases vides restent visibles pour garder des repères stables.
-        val cells = products + List((5 - products.size % 5) % 5 + if (products.size < 10) 5 else 0) { null }
-        LazyVerticalGrid(GridCells.Fixed(5), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(cells.size) { idx ->
-                val p = cells[idx]
-                if (p == null) {
-                    Box(Modifier.height(82.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFF0F1F3)))
-                } else {
-                    val tile = if ((idx / 5) % 2 == 0) c1 else c2
-                    Box(
-                        Modifier.height(82.dp).clip(RoundedCornerShape(4.dp)).background(if (paid) tile.copy(alpha = 0.4f) else tile)
-                            .clickable(enabled = !paid) { vm.add(p) }.padding(5.dp),
-                    ) {
-                        Text(p.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = Navy)
-                        Text(p.label, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Navy, textAlign = TextAlign.Center, maxLines = 2)
+        val cells = page?.let { keyboard?.cellsOf(it.id) }.orEmpty()
+        val (c1, c2) = FamilyTiles[page?.name] ?: (TileGreen to TileLavender)
+        KeyboardGrid(cells, c1, c2, dimmed = paid) { cell ->
+            if (!paid) when (cell) {
+                is KeyboardCell.ProductCell -> vm.add(cell.product)
+                is KeyboardCell.PageLink -> vm.openPage(cell.page.id)
+            }
+        }
+    }
+}
+
+/** Grille de 5 colonnes : cases vides visibles pour garder des repères stables, lignes de teintes alternées. */
+@Composable
+internal fun KeyboardGrid(
+    cells: Map<Int, KeyboardCell>, c1: Color, c2: Color, dimmed: Boolean = false, showEmpty: Boolean = false,
+    onEmpty: (Int) -> Unit = {}, onCell: (KeyboardCell) -> Unit,
+) {
+    val last = cells.keys.maxOrNull() ?: -1
+    val count = maxOf(10, ((last + 1 + 4) / 5) * 5 + if (showEmpty) 5 else 0)
+    LazyVerticalGrid(GridCells.Fixed(5), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items(count) { idx ->
+            val cell = cells[idx]
+            if (cell == null) {
+                Box(
+                    Modifier.height(82.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFF0F1F3)).clickable(enabled = showEmpty) { onEmpty(idx) },
+                    contentAlignment = Alignment.Center,
+                ) { if (showEmpty) Text("+", fontSize = 26.sp, color = Muted) }
+            } else {
+                val base = cell.color?.let { Color(it) } ?: if (cell is KeyboardCell.PageLink) Color(0xFF3D4A63) else if ((idx / 5) % 2 == 0) c1 else c2
+                val fg = if (cell is KeyboardCell.PageLink && cell.color == null) Color.White else Navy
+                Box(
+                    Modifier.height(82.dp).clip(RoundedCornerShape(4.dp)).background(if (dimmed) base.copy(alpha = 0.4f) else base)
+                        .clickable { onCell(cell) }.padding(5.dp),
+                ) {
+                    when (cell) {
+                        is KeyboardCell.ProductCell -> {
+                            Text(cell.product.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = fg)
+                            Text(cell.product.label, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = fg, textAlign = TextAlign.Center, maxLines = 2)
+                        }
+                        is KeyboardCell.PageLink -> {
+                            Text("→", Modifier.align(Alignment.TopEnd), fontSize = 16.sp, color = fg, fontWeight = FontWeight.Bold)
+                            Text(cell.page.name, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = fg, textAlign = TextAlign.Center, maxLines = 2)
+                        }
                     }
                 }
             }
@@ -728,7 +765,7 @@ private fun ReceiptDialog(r: ReceiptPreview, onDismiss: () -> Unit, onGift: (() 
         title = { Text(r.title) },
         text = {
             Column {
-                Text("SIMULÉ : aperçu papier 80 mm (imprimante non connectée).", color = Muted, fontSize = 11.sp)
+                Text("Aperçu du document (80 mm). Il est imprimé à son émission si une imprimante est reliée.", color = Muted, fontSize = 11.sp)
                 Surface(color = Color.White, shadowElevation = 2.dp, modifier = Modifier.padding(top = 6.dp)) {
                     Text(r.lines.joinToString("\n"), fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = Color.Black,
                         modifier = Modifier.padding(8.dp).verticalScroll(rememberScrollState()))

@@ -27,4 +27,15 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM journal_events").use { it.moveToFirst(); assertEquals(1, it.getInt(0)) }
         db.query("SELECT COUNT(*) FROM fiscal_documents").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
     }
+
+    @Test fun migration2vers3AjouteLeCatalogueSansToucherAuxDonnees() {
+        helper.createDatabase("migr3.db", 2).apply {
+            execSQL("INSERT INTO payments VALUES ('p1','o1','CARD',1200,1200,'marie','T01',1)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate("migr3.db", 3, true)
+        db.query("SELECT COUNT(*) FROM payments").use { it.moveToFirst(); assertEquals(1, it.getInt(0)) }
+        db.query("SELECT COUNT(*) FROM products").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+        db.query("SELECT COUNT(*) FROM keyboard_cells").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+    }
 }

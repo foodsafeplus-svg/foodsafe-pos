@@ -81,6 +81,13 @@ class PosRepository(
 
     private val ledger = FiscalLedger(fiscalStore, keys.signer, establishment, terminalId)
 
+    /** Catalogue éditable (produits, claviers) : réservé aux responsables, chaque modification est journalisée. */
+    val catalog = CatalogRepository(
+        db, ids::next, clock,
+        log = { a, t, e, i, b, af -> log(a, t, e, i, b, af) },
+        requireRight = { actor -> authorize(actor, SensitiveAction.EDIT_CATALOG, 0, null) },
+    )
+
     /**
      * À appeler une fois au démarrage, hors du thread UI : enregistre la clé publique du terminal
      * et crée l'équipe de démonstration si la base est vide.
@@ -88,6 +95,7 @@ class PosRepository(
     fun bootstrap() = db.runInTransaction {
         dao.insertKey(FiscalKeyEntity(keys.signer.keyId, B64.encode(keys.publicKey.encoded), clock()))
         seedDemoEmployees()
+        catalog.seedIfEmpty()
     }
 
     val tickets get() = dao.observeTickets()

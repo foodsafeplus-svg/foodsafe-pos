@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR }
+enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR, CATALOG, KEYBOARDS, PRODUCTS }
 
 data class TableSummary(val orderId: String, val table: String, val ownerId: String, val status: OrderStatus, val total: Cents)
 
@@ -90,6 +90,40 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
             TableSummary(o.id, o.tableNumber ?: "-", o.ownerEmployeeId, OrderStatus.valueOf(o.status), OrderPricer.price(order).totalTtc)
         }.sortedBy { it.table.toIntOrNull() ?: Int.MAX_VALUE }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ---------- Catalogue et claviers ----------
+
+    val catalog = repo.catalog.state.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private val prefs = app.getSharedPreferences("terminal", android.content.Context.MODE_PRIVATE)
+    private val _keyboardId = MutableStateFlow(prefs.getString("keyboardId", null))
+    /** Clavier utilisé par ce terminal (null = le premier). */
+    val keyboardId: StateFlow<String?> = _keyboardId.asStateFlow()
+    private val _page = MutableStateFlow<String?>(null)
+    /** Page affichée en vente (null = première page visible). */
+    val page: StateFlow<String?> = _page.asStateFlow()
+    private val pageStack = ArrayDeque<String>()
+    val canGoBackPage get() = pageStack.isNotEmpty()
+
+    fun useKeyboard(id: String) {
+        prefs.edit().putString("keyboardId", id).apply()
+        _keyboardId.value = id; _page.value = null; pageStack.clear()
+    }
+    fun selectTab(pageId: String) { touch(); pageStack.clear(); _page.value = pageId }
+    fun openPage(pageId: String) { touch(); _page.value?.let(pageStack::addLast); _page.value = pageId }
+    fun pageBack() { touch(); _page.value = pageStack.removeLastOrNull() }
+
+    private fun catalogEdit(message: String? = null, block: (String) -> Unit) = act<Unit>(message) { _, _ -> block(userId()) }
+    fun saveProduct(p: Product, message: String = "Produit enregistré") = catalogEdit(message) { repo.catalog.saveProduct(it, p) }
+    fun newProductId() = repo.catalog.newProductId()
+    fun addKeyboard(name: String) = catalogEdit("Clavier créé") { repo.catalog.addKeyboard(it, name) }
+    fun renameKeyboard(id: String, name: String) = catalogEdit { repo.catalog.renameKeyboard(it, id, name) }
+    fun addPage(keyboardId: String, name: String, visible: Boolean) = catalogEdit("Page créée") { repo.catalog.addPage(it, keyboardId, name, visible) }
+    fun updatePage(pageId: String, name: String? = null, visible: Boolean? = null) = catalogEdit { repo.catalog.updatePage(it, pageId, name, visible) }
+    fun movePage(pageId: String, delta: Int) = catalogEdit { repo.catalog.movePage(it, pageId, delta) }
+    fun deletePage(pageId: String) = catalogEdit("Page supprimée") { repo.catalog.deletePage(it, pageId) }
+    fun setProductCell(pageId: String, slot: Int, productId: String, color: Int?) = catalogEdit { repo.catalog.setProductCell(it, pageId, slot, productId, color) }
+    fun setPageLinkCell(pageId: String, slot: Int, target: String, color: Int?) = catalogEdit { repo.catalog.setPageLinkCell(it, pageId, slot, target, color) }
+    fun clearCell(pageId: String, slot: Int) = catalogEdit { repo.catalog.clearCell(it, pageId, slot) }
 
     /** Initialisation de la base hors du thread UI ; la connexion attend qu'elle soit terminée. */
     private val ready = viewModelScope.async(Dispatchers.IO) { repo.bootstrap() }

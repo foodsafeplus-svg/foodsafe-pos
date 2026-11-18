@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -58,6 +59,7 @@ class OrderScreenUiTest {
         rule.onNode(hasSetTextAction()).performTextInput("43")
         rule.onNodeWithText("Ouvrir").performClick()
         waitText("Niveau produit")
+        waitText("Salade César") // le clavier se charge depuis la base
 
         rule.onNodeWithText("Salade César").performClick(); waitText("NET À PAYER : 9,50 €")
         rule.onNodeWithText("PIZZAS").performClick()
@@ -145,13 +147,69 @@ class OrderScreenUiTest {
         waitText("COMPTEUR D'ESPÈCES")
     }
 
+    @Test fun produitsEtClaviersPageCachee() {
+        waitText("Saisissez votre code PIN")
+        pin("9999")
+        waitText("Nouvelle table")
+        rule.onNodeWithText("ACCUEIL").performClick()
+        rule.onNodeWithText("PRODUITS ET CLAVIERS").performClick()
+        rule.onNodeWithText("TOUS LES PRODUITS").performClick()
+        waitText("TOUS LES PRODUITS (22)")
+        rule.onNodeWithText("+ Nouveau produit").performClick()
+        waitText("Nouveau produit")
+        rule.onNode(hasSetTextAction() and hasText("Nom")).performTextInput("Sirop menthe")
+        rule.onNode(hasSetTextAction() and hasText("Prix TTC (€)")).performTextInput("2,50")
+        rule.onNodeWithText("Enregistrer").performClick()
+        waitText("TOUS LES PRODUITS (23)")
+        waitText("Sirop menthe")
+        capture("08-tous-les-produits")
+
+        // Page cachée « Sirops » + renvoi depuis la page Softs
+        rule.onNodeWithText("← Retour").performClick()
+        rule.onNodeWithText("CLAVIERS").performClick()
+        waitText("CLAVIER 1")
+        rule.onNodeWithText("+ Nouvelle page").performClick()
+        rule.onNode(hasSetTextAction() and hasText("Nom")).performTextInput("Sirops")
+        rule.onNodeWithText("Cachée (sous-page)").performClick()
+        rule.onNodeWithText("Valider").performClick()
+        waitText("SIROPS")
+        rule.onNodeWithText("SIROPS").performClick()
+        rule.onAllNodesWithText("+")[0].performClick()
+        waitText("Contenu de la case")
+        // le nouveau produit est dans la première catégorie (ordre alphabétique), affichée par défaut
+        rule.onNodeWithText("Sirop menthe").performClick()
+        waitText("2,50")
+        rule.onNodeWithText("SOFTS").performClick()
+        rule.onAllNodesWithText("+")[0].performClick()
+        rule.onNodeWithText("Aller à une page").performClick()
+        waitText("→ Sirops (cachée)")
+        rule.onNodeWithText("→ Sirops (cachée)").performClick()
+        waitText("Sirops")
+        capture("09-claviers")
+
+        // En vente : Softs → Sirops (page cachée) → Sirop menthe
+        rule.onNodeWithText("TABLES").performClick()
+        rule.onNodeWithText("Nouvelle table").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput("7")
+        rule.onNodeWithText("Ouvrir").performClick()
+        waitText("Niveau produit")
+        rule.onNodeWithText("SOFTS").performClick()
+        rule.onNodeWithText("Sirops").performClick()
+        waitText("← Sirops")
+        rule.onNodeWithText("Sirop menthe").performClick()
+        waitText("NET À PAYER : 2,50 €")
+        rule.onNodeWithText("← Sirops").performClick()
+        waitText("Soda 33 cl")
+    }
+
     private fun waitText(text: String, substring: Boolean = false) {
         repeat(150) {
             rule.waitForIdle()
             if (rule.exists(text, substring)) return
             Thread.sleep(50)
         }
-        rule.onRoot().printToLog("ARBRE")
+        val roots = rule.onAllNodes(androidx.compose.ui.test.isRoot())
+        repeat(roots.fetchSemanticsNodes().size) { roots[it].printToLog("ARBRE") }
         throw AssertionError("texte introuvable : $text")
     }
 

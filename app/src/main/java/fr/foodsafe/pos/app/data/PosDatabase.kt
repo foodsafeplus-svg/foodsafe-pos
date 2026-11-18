@@ -13,14 +13,17 @@ import fr.foodsafe.pos.core.journal.JournalSchema
         OrderEntity::class, OrderLineEntity::class, KitchenTicketEntity::class,
         ProcessedOperationEntity::class, PaymentEntity::class, JournalEventEntity::class,
         EmployeeEntity::class, FiscalDocumentEntity::class, FiscalKeyEntity::class,
+        ProductEntity::class, KeyboardEntity::class, KeyboardPageEntity::class, KeyboardCellEntity::class, ImageEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
     // v1 (incrément 1) → v2 : ajout des tables employés, documents fiscaux et clés. Aucune donnée existante modifiée.
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    // v2 → v3 : catalogue éditable (produits, claviers, pages, cases, images). Nouvelles tables uniquement.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
+    abstract fun catalogDao(): CatalogDao
 
     companion object {
         /** Triggers d'inaltérabilité, réinstallés (IF NOT EXISTS) à chaque ouverture. */

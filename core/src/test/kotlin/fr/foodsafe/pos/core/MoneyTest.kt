@@ -30,3 +30,15 @@ class MoneyTest {
         assertEquals("20 %", BasisPoints(2000).format())
     }
 }
+
+class B64Test {
+    @Test fun `codec base64 identique a la reference JDK`() {
+        val rnd = kotlin.random.Random(1)
+        repeat(500) {
+            val data = rnd.nextBytes(rnd.nextInt(0, 80))
+            val ref = java.util.Base64.getEncoder().encodeToString(data)
+            assertEquals(ref, fr.foodsafe.pos.core.util.B64.encode(data))
+            org.junit.jupiter.api.Assertions.assertArrayEquals(data, fr.foodsafe.pos.core.util.B64.decode(ref))
+        }
+    }
+}

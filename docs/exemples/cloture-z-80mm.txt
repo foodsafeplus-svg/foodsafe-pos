@@ -1,0 +1,22 @@
+                 PIZZERIA TEST
+                1 rue de la Paix
+                  75002 Paris
+              SIRET 12345678900011
+               TVA FR00123456789
+------------------------------------------------
+CLÔTURE Z n° 1
+Édité le 14/11/2023 23:13:53
+Tickets : 1 (n° 1 à 1)
+------------------------------------------------
+CA TTC                                   24,75 €
+dont remises                              2,75 €
+TVA 10 % (HT 17,59)                       1,76 €
+TVA 20 % (HT 4,50)                        0,90 €
+------------------------------------------------
+Espèces                                   9,75 €
+Carte (TPE)                              15,00 €
+------------------------------------------------
+Grand total perpétuel                    24,75 €
+GT perpétuel absolu                      24,75 €
+Empreinte 2bd9a0ce3cbd
+FOODSAFE+ POS 0.2.0

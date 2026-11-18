@@ -15,6 +15,10 @@ Chaque phase se termine par une **recette sur matériel réel** et une revue de 
 
 ## Phase 1 — MVP restaurant mono-établissement (8 à 12 semaines)
 
+> Avancement au 18/11/2026 (incrément 2) : points 1 (PIN, droits, inactivité) et 6 (documents fiscaux) faits ;
+> point 7 partiel (X/Z manuels, sans fonds de caisse ni Z automatique) ; point 2 partiel (liste des tables).
+> Détail : [G-etat-increment-2.md](G-etat-increment-2.md).
+
 1. Connexion PIN, rôles, politiques d'action, déconnexion par inactivité.
 2. Plan de salle (une salle), ouverture, déplacement, renumérotation, transfert serveur.
 3. Catalogue local éditable sur la caisse (familles, produits, TVA par mode).

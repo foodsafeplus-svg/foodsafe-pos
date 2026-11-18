@@ -6,7 +6,7 @@ import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
-import java.util.Base64
+import fr.foodsafe.pos.core.util.B64
 
 /**
  * Signature des documents fiscaux (ECDSA P-256 / SHA-256).
@@ -20,7 +20,7 @@ interface FiscalSigner {
 
 class EcdsaSigner(override val keyId: String, private val privateKey: PrivateKey) : FiscalSigner {
     override fun sign(data: ByteArray): String = Signature.getInstance(ALGO).run {
-        initSign(privateKey); update(data); Base64.getEncoder().encodeToString(sign())
+        initSign(privateKey); update(data); B64.encode(sign())
     }
     companion object {
         const val ALGO = "SHA256withECDSA"
@@ -33,7 +33,7 @@ class EcdsaSigner(override val keyId: String, private val privateKey: PrivateKey
 object SignatureVerifier {
     fun verify(publicKey: PublicKey, data: ByteArray, signatureB64: String): Boolean = runCatching {
         Signature.getInstance(EcdsaSigner.ALGO).run {
-            initVerify(publicKey); update(data); verify(Base64.getDecoder().decode(signatureB64))
+            initVerify(publicKey); update(data); verify(B64.decode(signatureB64))
         }
     }.getOrDefault(false)
 }

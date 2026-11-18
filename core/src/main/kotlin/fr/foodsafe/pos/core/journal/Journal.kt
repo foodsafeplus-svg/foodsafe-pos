@@ -30,14 +30,17 @@ data class JournalEvent(
  * (les null sont codés "-1:"). Deux contenus différents ne peuvent pas produire la même chaîne.
  */
 object CanonicalEncoder {
-    fun encode(seq: Long, d: JournalDraft): String = buildString {
-        fun field(v: String?) {
+    fun encode(seq: Long, d: JournalDraft): String = fields(
+        seq.toString(), d.id, d.establishmentId, d.terminalId, d.actorId, d.occurredAt.toString(),
+        d.type, d.entityType, d.entityId, d.beforeJson, d.afterJson, d.reason,
+    )
+
+    /** Encodage générique, réutilisé pour les documents fiscaux. */
+    fun fields(vararg values: String?): String = buildString {
+        for (v in values) {
             if (v == null) append("-1:") else append(v.toByteArray(Charsets.UTF_8).size).append(':').append(v)
             append('|')
         }
-        field(seq.toString()); field(d.id); field(d.establishmentId); field(d.terminalId); field(d.actorId)
-        field(d.occurredAt.toString()); field(d.type); field(d.entityType); field(d.entityId)
-        field(d.beforeJson); field(d.afterJson); field(d.reason)
     }
 }
 

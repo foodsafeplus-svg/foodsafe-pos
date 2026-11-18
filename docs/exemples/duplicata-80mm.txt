@@ -1,0 +1,28 @@
+               *** DUPLICATA ***
+                 PIZZERIA TEST
+                1 rue de la Paix
+                  75002 Paris
+              SIRET 12345678900011
+               TVA FR00123456789
+------------------------------------------------
+TABLE 43
+1 x Salade César                            9,50
+   remise                                  -0,95
+1 x Pizza Margherita                       12,00
+   remise                                  -1,20
+1 x Bière pression                          6,00
+   remise                                  -0,60
+------------------------------------------------
+TOTAL TTC                                24,75 €
+Taux      HT        TVA                      TTC
+10 %      17,59     1,76                   19,35
+20 %      4,50      0,90                    5,40
+------------------------------------------------
+Carte (TPE)                              15,00 €
+Espèces                                   9,75 €
+------------------------------------------------
+Duplicata n° T01-D-000001
+14/11/2023 23:13:49
+Terminal T01
+Empreinte 748f1bb90733
+FOODSAFE+ POS 0.2.0

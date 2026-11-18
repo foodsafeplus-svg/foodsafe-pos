@@ -20,8 +20,8 @@ android {
         applicationId = "fr.foodsafe.pos"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-increment1"
+        versionCode = 2
+        versionName = "0.2.0-increment2"
     }
 
     signingConfigs {
@@ -48,16 +48,21 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // java.time (tickets, dates) sur Android 7.x
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
+    // Schémas Room exportés, lus par les tests de migration (inclus dans l'APK debug uniquement)
+    sourceSets["debug"].assets.srcDir("$projectDir/schemas")
 }
 
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 dependencies {
     implementation(project(":core"))
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -75,6 +80,7 @@ dependencies {
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.room.testing)
     testImplementation(libs.coroutines.test)
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)
@@ -84,5 +90,6 @@ dependencies {
 tasks.withType<Test>().configureEach {
     testLogging { events("passed", "failed", "skipped") }
     systemProperty("screenshotDir", rootProject.file("docs/captures").absolutePath)
+    systemProperty("examplesDir", rootProject.file("docs/exemples").absolutePath)
     providers.gradleProperty("mavenMirror").orNull?.let { systemProperty("robolectric.dependency.repo.url", it) }
 }

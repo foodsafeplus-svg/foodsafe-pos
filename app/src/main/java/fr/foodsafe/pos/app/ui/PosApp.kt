@@ -220,8 +220,16 @@ private fun LoginScreen(establishment: String, error: String?, onPin: (String) -
             Text(hour.format(Date(now)), fontSize = 56.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Text(day.format(Date(now)), fontSize = 15.sp, color = Color.White)
         }
-        Surface(Modifier.align(Alignment.BottomEnd).padding(20.dp), shape = RoundedCornerShape(6.dp), color = Color.White) {
-            Text("Version $version", Modifier.padding(horizontal = 10.dp, vertical = 4.dp), fontWeight = FontWeight.SemiBold, color = Navy)
+        Row(Modifier.align(Alignment.BottomEnd).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                Modifier.clickable { ctx.startActivity(android.content.Intent(ctx, fr.foodsafe.pos.app.hardware.HardwareTestActivity::class.java)) },
+                shape = RoundedCornerShape(6.dp), color = Color.White,
+            ) {
+                Text("Test matériel", Modifier.padding(horizontal = 10.dp, vertical = 4.dp), fontWeight = FontWeight.SemiBold, color = Navy)
+            }
+            Surface(shape = RoundedCornerShape(6.dp), color = Color.White) {
+                Text("Version $version", Modifier.padding(horizontal = 10.dp, vertical = 4.dp), fontWeight = FontWeight.SemiBold, color = Navy)
+            }
         }
     }
 }

@@ -7,7 +7,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
-      - uses: android-actions/setup-android@v3
+      # Les runners ubuntu-latest fournissent déjà le SDK Android (ANDROID_HOME).
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug
       - uses: actions/upload-artifact@v4

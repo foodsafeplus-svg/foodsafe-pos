@@ -154,13 +154,15 @@ class OrderScreenUiTest {
         rule.onNodeWithText("ACCUEIL").performClick()
         rule.onNodeWithText("PRODUITS ET CLAVIERS").performClick()
         rule.onNodeWithText("TOUS LES PRODUITS").performClick()
-        waitText("TOUS LES PRODUITS (22)")
+        waitText("TOUS LES PRODUITS (", substring = true)
+        waitText("Salade César") // catalogue chargé
+        val avant = productCount()
         rule.onNodeWithText("+ Nouveau produit").performClick()
         waitText("Nouveau produit")
         rule.onNode(hasSetTextAction() and hasText("Nom")).performTextInput("Sirop menthe")
         rule.onNode(hasSetTextAction() and hasText("Prix TTC (€)")).performTextInput("2,50")
         rule.onNodeWithText("Enregistrer").performClick()
-        waitText("TOUS LES PRODUITS (23)")
+        waitText("TOUS LES PRODUITS (${avant + 1})")
         waitText("Sirop menthe")
         capture("08-tous-les-produits")
 
@@ -201,6 +203,45 @@ class OrderScreenUiTest {
         rule.onNodeWithText("← Sirops").performClick()
         waitText("Soda 33 cl")
     }
+
+    @Test fun assistantCreationProduitPuisVente() {
+        waitText("Saisissez votre code PIN")
+        pin("9999")
+        waitText("Nouvelle table")
+        rule.onNodeWithText("ACCUEIL").performClick()
+        rule.onNodeWithText("PRODUITS ET CLAVIERS").performClick()
+        rule.onNodeWithText("ASSISTANT CRÉATION PRODUIT").performClick()
+        waitText("1. Nom")
+        rule.onNode(hasSetTextAction()).performTextInput("Café gourmand")
+        rule.onNodeWithText("Suivant").performClick()
+        listOf("7", ",", "9", "0").forEach { rule.onNodeWithTag("prix-$it").performClick() }
+        waitText("7,90 €")
+        rule.onNodeWithText("Suivant").performClick()
+        waitText("Taux de TVA")
+        rule.onNodeWithText("Suivant").performClick()
+        rule.onNodeWithText("Desserts").performClick()
+        rule.onNodeWithText("Suivant").performClick()
+        waitText("Image du bouton (facultatif)")
+        rule.onNodeWithText("Suivant").performClick()
+        waitText("Page où placer le bouton")
+        rule.onNodeWithText("Suivant").performClick() // page « Desserts » proposée d'après la catégorie
+        waitText("Touchez une case libre", substring = true)
+        capture("10-assistant-placement")
+        rule.onAllNodesWithText("+")[0].performClick()
+        waitText("TOUS LES PRODUITS")
+
+        rule.onNodeWithText("TABLES").performClick()
+        rule.onNodeWithText("Nouvelle table").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput("5")
+        rule.onNodeWithText("Ouvrir").performClick()
+        waitText("Niveau produit")
+        rule.onNodeWithText("DESSERTS").performClick()
+        rule.onNodeWithText("Café gourmand").performClick()
+        waitText("NET À PAYER : 7,90 €")
+    }
+
+    private fun productCount(): Int = rule.onAllNodes(hasText("TOUS LES PRODUITS (", substring = true)).fetchSemanticsNodes()
+        .first().config[androidx.compose.ui.semantics.SemanticsProperties.Text].first().text.substringAfter('(').substringBefore(')').toInt()
 
     private fun waitText(text: String, substring: Boolean = false) {
         repeat(150) {

@@ -62,6 +62,7 @@ class PosRepository(
     private val clock: () -> Long = System::currentTimeMillis,
     private val ids: IdGenerator = IdGenerator { UUID.randomUUID().toString() },
     private val policy: PermissionPolicy = PermissionPolicy.DEFAULT,
+    private val imagesDir: java.io.File? = null,
 ) {
     private val dao = db.dao()
     private val authenticator = PinAuthenticator()
@@ -86,6 +87,7 @@ class PosRepository(
         db, ids::next, clock,
         log = { a, t, e, i, b, af -> log(a, t, e, i, b, af) },
         requireRight = { actor -> authorize(actor, SensitiveAction.EDIT_CATALOG, 0, null) },
+        imagesDir = imagesDir,
     )
 
     /**

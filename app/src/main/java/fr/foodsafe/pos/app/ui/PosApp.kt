@@ -253,7 +253,7 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
             val tabs = listOf(Screen.HOME to "Accueil", Screen.TABLES to "Tables", Screen.DOCUMENTS to "Tickets", Screen.CLOSURE to "Clôtures", Screen.KITCHEN to "Bons cuisine", Screen.JOURNAL to "Journal")
             tabs.forEach { (screen, label) ->
                 val selected = state.screen == screen || (screen == Screen.TABLES && state.screen == Screen.ORDER) ||
-                    (screen == Screen.HOME && state.screen in setOf(Screen.CASH_COUNT, Screen.CALCULATOR, Screen.CATALOG, Screen.KEYBOARDS, Screen.PRODUCTS))
+                    (screen == Screen.HOME && state.screen in setOf(Screen.CASH_COUNT, Screen.CALCULATOR, Screen.CATALOG, Screen.KEYBOARDS, Screen.PRODUCTS, Screen.IMAGES, Screen.WIZARD))
                 Box(
                     Modifier.padding(horizontal = 3.dp).clip(RoundedCornerShape(6.dp)).background(if (selected) FsBlue else NavySoft)
                         .clickable { if (screen == Screen.TABLES) vm.backToTables() else vm.show(screen) }.padding(horizontal = 11.dp, vertical = 9.dp),
@@ -280,6 +280,8 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
                 Screen.CATALOG -> CatalogHubScreen(vm)
                 Screen.KEYBOARDS -> KeyboardsScreen(vm)
                 Screen.PRODUCTS -> ProductsScreen(vm)
+                Screen.IMAGES -> ImagesScreen(vm)
+                Screen.WIZARD -> ProductWizardScreen(vm)
             }
         }
     }
@@ -569,7 +571,7 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
         }
         val cells = page?.let { keyboard?.cellsOf(it.id) }.orEmpty()
         val (c1, c2) = FamilyTiles[page?.name] ?: (TileGreen to TileLavender)
-        KeyboardGrid(cells, c1, c2, dimmed = paid) { cell ->
+        KeyboardGrid(cells, c1, c2, dimmed = paid, images = catalog?.images.orEmpty().mapNotNull { i -> i.file?.let { i.id to it } }.toMap()) { cell ->
             if (!paid) when (cell) {
                 is KeyboardCell.ProductCell -> vm.add(cell.product)
                 is KeyboardCell.PageLink -> vm.openPage(cell.page.id)
@@ -582,6 +584,7 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
 @Composable
 internal fun KeyboardGrid(
     cells: Map<Int, KeyboardCell>, c1: Color, c2: Color, dimmed: Boolean = false, showEmpty: Boolean = false,
+    images: Map<String, java.io.File> = emptyMap(),
     onEmpty: (Int) -> Unit = {}, onCell: (KeyboardCell) -> Unit,
 ) {
     val last = cells.keys.maxOrNull() ?: -1
@@ -603,6 +606,7 @@ internal fun KeyboardGrid(
                 ) {
                     when (cell) {
                         is KeyboardCell.ProductCell -> {
+                            cell.product.imageId?.let(images::get)?.let { f -> ImageThumb(f, Modifier.align(Alignment.TopCenter).size(40.dp)) }
                             Text(cell.product.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = fg)
                             Text(cell.product.label, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = fg, textAlign = TextAlign.Center, maxLines = 2)
                         }

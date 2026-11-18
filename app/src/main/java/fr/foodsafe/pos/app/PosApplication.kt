@@ -31,7 +31,7 @@ open class PosApplication : Application() {
     protected open fun createPrinter(): TicketPrinter = UsbEscPosPrinter(this)
 
     val repository by lazy {
-        PosRepository(PosDatabase.build(this), establishment, terminalId = "T01", keys = keyProvider())
+        PosRepository(PosDatabase.build(this), establishment, terminalId = "T01", keys = keyProvider(), imagesDir = java.io.File(filesDir, "images"))
     }
 
     /**

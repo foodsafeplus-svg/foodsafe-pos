@@ -34,5 +34,6 @@ interface CatalogDao {
 
     @Query("SELECT * FROM images ORDER BY createdAt DESC") fun observeImages(): Flow<List<ImageEntity>>
     @Upsert fun upsertImage(i: ImageEntity)
+    @Query("SELECT * FROM images WHERE id = :id") fun imageById(id: String): ImageEntity?
     @Delete fun deleteImage(i: ImageEntity)
 }

@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR, CATALOG, KEYBOARDS, PRODUCTS }
+enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR, CATALOG, KEYBOARDS, PRODUCTS, IMAGES, WIZARD }
 
 data class TableSummary(val orderId: String, val table: String, val ownerId: String, val status: OrderStatus, val total: Cents)
 
@@ -124,6 +124,30 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     fun setProductCell(pageId: String, slot: Int, productId: String, color: Int?) = catalogEdit { repo.catalog.setProductCell(it, pageId, slot, productId, color) }
     fun setPageLinkCell(pageId: String, slot: Int, target: String, color: Int?) = catalogEdit { repo.catalog.setPageLinkCell(it, pageId, slot, target, color) }
     fun clearCell(pageId: String, slot: Int) = catalogEdit { repo.catalog.clearCell(it, pageId, slot) }
+    fun createAndPlace(p: Product, pageId: String, slot: Int, onDone: () -> Unit) =
+        act<Product>("Produit « ${p.label} » créé et placé", onSuccess = { onDone() }) { _, _ -> repo.catalog.createAndPlace(userId(), p, pageId, slot) }
+    fun deleteImage(id: String) = catalogEdit("Image supprimée") { repo.catalog.deleteImage(it, id) }
+
+    /** Importe une image choisie sur la tablette : réduite à 256 px max, enregistrée en JPEG dans le stockage privé. */
+    fun importImage(uri: android.net.Uri) = act<String>("Image importée") { _, _ ->
+        val app = getApplication<Application>()
+        val cr = app.contentResolver
+        val name = runCatching {
+            cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull()?.substringBeforeLast('.') ?: "Image"
+        val bytes = cr.openInputStream(uri)?.use { it.readBytes() } ?: error("image illisible")
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 256) sample *= 2
+        val decoded = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+            ?: error("format d'image non reconnu")
+        val scale = 256f / maxOf(decoded.width, decoded.height)
+        val bmp = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt().coerceAtLeast(1), (decoded.height * scale).toInt().coerceAtLeast(1), true) else decoded
+        val out = java.io.ByteArrayOutputStream()
+        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
+        repo.catalog.addImage(userId(), name.take(30), out.toByteArray())
+    }
 
     /** Initialisation de la base hors du thread UI ; la connexion attend qu'elle soit terminée. */
     private val ready = viewModelScope.async(Dispatchers.IO) { repo.bootstrap() }

@@ -22,7 +22,10 @@ data class Keyboard(val id: String, val name: String, val pages: List<KeyboardPa
     fun cellsOf(pageId: String): Map<Int, KeyboardCell> = cells[pageId].orEmpty()
 }
 
-data class CatalogState(val products: List<Product>, val keyboards: List<Keyboard>) {
+data class CatalogImage(val id: String, val name: String, val file: java.io.File?)
+
+data class CatalogState(val products: List<Product>, val keyboards: List<Keyboard>, val images: List<CatalogImage> = emptyList()) {
+    fun image(id: String?): CatalogImage? = id?.let { i -> images.firstOrNull { it.id == i } }
     val categories: List<String> get() = products.map { it.category }.distinct()
     fun keyboard(id: String?): Keyboard? = keyboards.firstOrNull { it.id == id } ?: keyboards.firstOrNull()
 }
@@ -37,12 +40,15 @@ class CatalogRepository internal constructor(
     private val clock: () -> Long,
     private val log: (actorId: String, type: String, entityType: String, entityId: String, before: String?, after: String?) -> Unit,
     private val requireRight: (actorId: String) -> Unit,
+    /** Dossier des images importées (stockage privé de l'application). */
+    private val imagesDir: java.io.File? = null,
 ) {
     private val dao = db.catalogDao()
 
-    val state: Flow<CatalogState> = combine(dao.observeProducts(), dao.observeKeyboards(), dao.observePages(), dao.observeCells()) { p, k, pg, c ->
-        build(p, k, pg, c)
-    }
+    val state: Flow<CatalogState> = combine(
+        combine(dao.observeProducts(), dao.observeKeyboards(), dao.observePages(), dao.observeCells()) { p, k, pg, c -> build(p, k, pg, c) },
+        dao.observeImages(),
+    ) { st, imgs -> st.copy(images = imgs.map { CatalogImage(it.id, it.name, imagesDir?.let { d -> java.io.File(d, it.fileName) }) }) }
 
     private fun build(p: List<ProductEntity>, k: List<KeyboardEntity>, pg: List<KeyboardPageEntity>, c: List<KeyboardCellEntity>): CatalogState {
         val products = p.map { it.toDomain() }
@@ -89,6 +95,47 @@ class CatalogRepository internal constructor(
     }
 
     fun newProductId() = "p-" + ids()
+
+    /** Assistant : crée le produit et le place dans la case choisie, en une seule transaction. */
+    fun createAndPlace(actorId: String, p: Product, pageId: String, slot: Int): Product {
+        requireRight(actorId)
+        require(p.label.isNotBlank()) { "nom du produit requis" }
+        require(dao.page(pageId) != null) { "page inconnue" }
+        return db.runInTransaction<Product> {
+            dao.upsertProduct(p.toEntity(clock()))
+            log(actorId, "PRODUCT_CREATED", "product", p.id, null, p.toEntity(0).summary())
+            dao.upsertCell(KeyboardCellEntity(pageId, slot, "PRODUCT", p.id, p.color))
+            log(actorId, "KEYBOARD_UPDATED", "keyboard", pageId, null, null)
+            p
+        }
+    }
+
+    // ---------- Images ----------
+
+    /** Enregistre une image déjà réduite (JPEG) dans le stockage privé. */
+    fun addImage(actorId: String, name: String, jpeg: ByteArray): String {
+        requireRight(actorId)
+        val dir = imagesDir ?: error("stockage des images indisponible")
+        dir.mkdirs()
+        val id = "img-" + ids()
+        val file = java.io.File(dir, "$id.jpg")
+        file.writeBytes(jpeg)
+        return db.runInTransaction<String> {
+            dao.upsertImage(ImageEntity(id, name.ifBlank { "Image" }, file.name, clock()))
+            log(actorId, "IMAGE_ADDED", "image", id, null, name)
+            id
+        }
+    }
+
+    /** Supprime une image ; les produits qui l'utilisaient n'ont plus d'image. */
+    fun deleteImage(actorId: String, id: String) {
+        requireRight(actorId)
+        db.runInTransaction {
+            dao.products().filter { it.imageId == id }.forEach { dao.upsertProduct(it.copy(imageId = null, updatedAt = clock())) }
+            dao.imageById(id)?.let { img -> dao.deleteImage(img); imagesDir?.let { java.io.File(it, img.fileName).delete() } }
+            log(actorId, "IMAGE_DELETED", "image", id, null, null)
+        }
+    }
 
     // ---------- Claviers et pages ----------
 

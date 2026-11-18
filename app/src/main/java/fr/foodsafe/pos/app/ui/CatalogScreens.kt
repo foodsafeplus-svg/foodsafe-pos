@@ -40,7 +40,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -82,8 +84,8 @@ internal fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
 internal fun CatalogHubScreen(vm: PosViewModel) {
     data class T(val label: String, val glyph: String, val color: Color, val target: Screen?)
     val tiles = listOf(
-        T("Assistant création produit", "+", Color(0xFFD62850), null),
-        T("Images", "▣", Color(0xFF3F8FE0), null),
+        T("Assistant création produit", "+", Color(0xFFD62850), Screen.WIZARD),
+        T("Images", "▣", Color(0xFF3F8FE0), Screen.IMAGES),
         T("Claviers", "#", Color(0xFF7A2E2E), Screen.KEYBOARDS),
         T("Commentaires et suppléments", "✎", Color(0xFF2F55C8), null),
         T("Formules", "F", Color(0xFF43A047), null),
@@ -180,7 +182,7 @@ internal fun KeyboardsScreen(vm: PosViewModel) {
             Text("Touchez une case pour y placer un produit ou un renvoi vers une page.", fontSize = 12.sp, color = Muted, modifier = Modifier.padding(vertical = 6.dp))
             if (page != null) {
                 val (c1, c2) = FamilyTiles[page.name] ?: (TileGreen to TileLavender)
-                KeyboardGrid(kb.cellsOf(page.id), c1, c2, showEmpty = true, onEmpty = { editCell = it }) { editCell = it.slot }
+                KeyboardGrid(kb.cellsOf(page.id), c1, c2, showEmpty = true, images = catalog?.imageFiles().orEmpty(), onEmpty = { editCell = it }) { editCell = it.slot }
             }
         }
     }
@@ -313,13 +315,17 @@ internal fun ProductsScreen(vm: PosViewModel) {
     }
     editing?.let { p ->
         ProductDialog(p, catalog?.categories.orEmpty(), isNew = products.none { it.id == p.id },
-            onSave = { vm.saveProduct(it); editing = null }, onDismiss = { editing = null })
+            onSave = { vm.saveProduct(it); editing = null }, onDismiss = { editing = null }, images = catalog?.images.orEmpty())
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ProductDialog(initial: Product, categories: List<String>, isNew: Boolean, onSave: (Product) -> Unit, onDismiss: () -> Unit) {
+internal fun ProductDialog(
+    initial: Product, categories: List<String>, isNew: Boolean, onSave: (Product) -> Unit, onDismiss: () -> Unit,
+    images: List<fr.foodsafe.pos.app.data.CatalogImage> = emptyList(),
+) {
+    var imageId by remember { mutableStateOf(initial.imageId) }
     var label by remember { mutableStateOf(initial.label) }
     var price by remember { mutableStateOf(if (isNew) "" else initial.price.format(false).replace(" ", "")) }
     var vat by remember { mutableStateOf(initial.vat) }
@@ -354,6 +360,10 @@ internal fun ProductDialog(initial: Product, categories: List<String>, isNew: Bo
                     Spacer(Modifier.width(12.dp))
                     (0..3).map(::ServiceLevel).forEach { l -> Chip(l.label, l == level) { level = l } }
                 }
+                if (images.isNotEmpty()) {
+                    Text("Image du bouton", fontSize = 13.sp, color = Muted)
+                    ImagePicker(images, imageId) { imageId = it }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Chip("Actif", active) { active = true }
                     Chip("Inactif (retiré de la vente)", !active) { active = false }
@@ -365,7 +375,7 @@ internal fun ProductDialog(initial: Product, categories: List<String>, isNew: Bo
         },
         confirmButton = {
             Button(
-                onClick = { onSave(initial.copy(label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null }, defaultLevel = level, destination = dest, active = active)) },
+                onClick = { onSave(initial.copy(label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null }, defaultLevel = level, destination = dest, active = active, imageId = imageId)) },
                 enabled = label.isNotBlank() && cents != null,
             ) { Text("Enregistrer") }
         },
@@ -373,3 +383,209 @@ internal fun ProductDialog(initial: Product, categories: List<String>, isNew: Bo
     )
 }
 
+
+internal fun fr.foodsafe.pos.app.data.CatalogState.imageFiles(): Map<String, java.io.File> =
+    images.mapNotNull { i -> i.file?.let { i.id to it } }.toMap()
+
+/** Vignette d'une image importée (décodée une fois, à la taille déjà réduite à l'import). */
+@Composable
+internal fun ImageThumb(file: java.io.File, modifier: Modifier = Modifier) {
+    val bmp = remember(file.path) { runCatching { android.graphics.BitmapFactory.decodeFile(file.path)?.asImageBitmap() }.getOrNull() }
+    if (bmp != null) androidx.compose.foundation.Image(bmp, contentDescription = null, modifier = modifier, contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+}
+
+@Composable
+private fun ImagePicker(images: List<fr.foodsafe.pos.app.data.CatalogImage>, selected: String?, onSelect: (String?) -> Unit) {
+    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        item {
+            Box(Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)).background(Color.White).border(2.dp, if (selected == null) FsBlue else KeyBlue, RoundedCornerShape(6.dp)).clickable { onSelect(null) },
+                contentAlignment = Alignment.Center) { Text("Aucune", fontSize = 11.sp, color = Navy) }
+        }
+        items(images, key = { it.id }) { img ->
+            Box(Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)).background(Color.White).border(2.dp, if (selected == img.id) FsBlue else Color.Transparent, RoundedCornerShape(6.dp))
+                .clickable { onSelect(img.id) }.padding(4.dp), contentAlignment = Alignment.Center) {
+                img.file?.let { ImageThumb(it, Modifier.fillMaxSize()) }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Images
+
+@Composable
+internal fun ImagesScreen(vm: PosViewModel) {
+    val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val images = catalog?.images.orEmpty()
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        uri?.let(vm::importImage)
+    }
+    var confirm by remember { mutableStateOf<fr.foodsafe.pos.app.data.CatalogImage?>(null) }
+    Column(Modifier.fillMaxSize().background(TicketBg).padding(12.dp)) {
+        ScreenHeader("IMAGES (${images.size})", onBack = { vm.show(Screen.CATALOG) }) {
+            PadKey("+ Importer une image", Modifier.size(220.dp, 44.dp), color = PayCash, textColor = Color.White, fontSize = 15.sp) { picker.launch("image/*") }
+        }
+        Text("Importez des photos ou des visuels (ex. une canette) depuis la tablette, une clé USB ou un dossier partagé. Ils sont réduits automatiquement, puis se choisissent dans la fiche d'un produit.",
+            fontSize = 13.sp, color = Muted, modifier = Modifier.padding(bottom = 8.dp))
+        if (images.isEmpty()) Text("Aucune image pour l'instant.", color = Muted)
+        LazyVerticalGrid(GridCells.Fixed(8), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(images, key = { it.id }) { img ->
+                Column(Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) { img.file?.let { ImageThumb(it, Modifier.fillMaxSize()) } }
+                    Text(img.name, fontSize = 12.sp, color = Navy, maxLines = 1)
+                    Text("Supprimer", Modifier.clickable { confirm = img }.padding(4.dp), fontSize = 12.sp, color = Color(0xFFC62828))
+                }
+            }
+        }
+    }
+    confirm?.let { img ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("Supprimer l'image « ${img.name} » ?") },
+            text = { Text("Les produits qui l'utilisent n'auront plus d'image. Les ventes ne sont pas touchées.") },
+            confirmButton = { Button(onClick = { vm.deleteImage(img.id); confirm = null }) { Text("Supprimer") } },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Annuler") } },
+        )
+    }
+}
+
+// ---------------------------------------------------------------- Assistant de création de produit
+
+/**
+ * Assistant pas à pas : nom, prix, TVA et envoi, catégorie, image, clavier et page, puis placement
+ * en touchant une case libre. Le produit n'est créé qu'à la dernière étape (création et placement en une transaction).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun ProductWizardScreen(vm: PosViewModel) {
+    val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val activeKb by vm.keyboardId.collectAsStateWithLifecycle()
+    val steps = listOf("Nom", "Prix", "TVA et envoi", "Catégorie", "Image", "Page", "Placement")
+    var step by remember { mutableStateOf(0) }
+    var label by remember { mutableStateOf("") }
+    var price by remember { mutableStateOf("") }
+    var vat by remember { mutableStateOf(FrenchVat.INTERMEDIATE) }
+    var dest by remember { mutableStateOf("CUISINE") }
+    var level by remember { mutableStateOf(ServiceLevel.DIRECT) }
+    var category by remember { mutableStateOf("") }
+    var sub by remember { mutableStateOf("") }
+    var imageId by remember { mutableStateOf<String?>(null) }
+    var kbId by remember { mutableStateOf<String?>(null) }
+    var pageId by remember { mutableStateOf<String?>(null) }
+    val cents = parsePrice(price)
+    val keyboards = catalog?.keyboards.orEmpty()
+    val kb = keyboards.firstOrNull { it.id == (kbId ?: activeKb) } ?: keyboards.firstOrNull()
+    val canNext = when (step) {
+        0 -> label.isNotBlank()
+        1 -> cents != null && cents.value > 0
+        3 -> category.isNotBlank()
+        5 -> pageId != null && kb?.pages?.any { it.id == pageId } == true
+        else -> true
+    }
+    Column(Modifier.fillMaxSize().background(TicketBg).padding(16.dp)) {
+        ScreenHeader("ASSISTANT CRÉATION PRODUIT", onBack = { vm.show(Screen.CATALOG) })
+        Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            steps.forEachIndexed { i, s ->
+                val bg = when { i == step -> FsBlue; i < step -> PayCash; else -> Color(0xFFE3E8F0) }
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(bg).padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    Text("${i + 1}. $s", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (i <= step) Color.White else Navy)
+                }
+            }
+        }
+        Column(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            when (step) {
+                0 -> {
+                    Text("Nom du produit tel qu'il apparaît sur le bouton, la note et le ticket", color = Navy, fontSize = 17.sp)
+                    OutlinedTextField(label, { label = it.take(40) }, Modifier.width(520.dp), label = { Text("Nom") }, singleLine = true)
+                }
+                1 -> {
+                    Text("Prix de vente TTC", color = Navy, fontSize = 17.sp)
+                    Text(if (price.isEmpty()) "0,00 €" else "$price €", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = if (price.isNotEmpty() && cents == null) Warn else Navy)
+                    Column(Modifier.width(330.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(listOf("7", "8", "9"), listOf("4", "5", "6"), listOf("1", "2", "3"), listOf(",", "0", "C")).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                row.forEach { k ->
+                                    PadKey(k, Modifier.weight(1f).height(58.dp).testTag("prix-$k")) {
+                                        price = when {
+                                            k == "C" -> ""
+                                            k == "," && (price.contains(',') || price.isEmpty()) -> price
+                                            price.substringAfter(',', "").length >= 2 && price.contains(',') -> price
+                                            price.length >= 7 -> price
+                                            else -> price + k
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                2 -> {
+                    Text("Taux de TVA", color = Navy, fontSize = 17.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { VatChoices.forEach { r -> Chip(r.format(), r == vat) { vat = r } } }
+                    Text("Sur place, en restauration : 10 % pour les plats et les boissons sans alcool, 20 % pour l'alcool. Vérifiez avec votre comptable pour les cas particuliers (vente à emporter, produits conditionnés).",
+                        fontSize = 13.sp, color = Muted)
+                    Text("Envoi en préparation", color = Navy, fontSize = 17.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("CUISINE", "BAR").forEach { d -> Chip(d.lowercase().replaceFirstChar { it.uppercase() }, d == dest) { dest = d } }
+                        Spacer(Modifier.width(12.dp))
+                        (0..3).map(::ServiceLevel).forEach { l -> Chip(l.label, l == level) { level = l } }
+                    }
+                }
+                3 -> {
+                    Text("Catégorie (utilisée pour les statistiques et le classement)", color = Navy, fontSize = 17.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        catalog?.categories.orEmpty().forEach { c -> Chip(c, c == category) { category = c } }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(category, { category = it.take(30) }, Modifier.width(300.dp), label = { Text("Catégorie") }, singleLine = true)
+                        OutlinedTextField(sub, { sub = it.take(30) }, Modifier.width(300.dp), label = { Text("Sous-catégorie (facultatif)") }, singleLine = true)
+                    }
+                }
+                4 -> {
+                    Text("Image du bouton (facultatif)", color = Navy, fontSize = 17.sp)
+                    val images = catalog?.images.orEmpty()
+                    if (images.isEmpty()) Text("Aucune image importée. Vous pourrez en ajouter depuis « Images », puis l'associer dans la fiche du produit.", color = Muted, fontSize = 14.sp)
+                    else ImagePicker(images, imageId) { imageId = it }
+                }
+                5 -> {
+                    Text("Clavier", color = Navy, fontSize = 17.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        keyboards.forEach { k -> Chip(k.name, k.id == kb?.id) { kbId = k.id; pageId = null } }
+                    }
+                    Text("Page où placer le bouton", color = Navy, fontSize = 17.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        kb?.pages.orEmpty().sortedBy { it.position }.forEach { pg ->
+                            Chip(pg.name + if (!pg.visible) " (cachée)" else "", pg.id == pageId) { pageId = pg.id }
+                        }
+                    }
+                }
+                6 -> {
+                    val pg = kb?.pages?.firstOrNull { it.id == pageId }
+                    Text("Touchez une case libre (+) de la page « ${pg?.name ?: ""} » pour y placer « ${label.trim()} » à ${cents?.format() ?: ""}", color = Navy, fontSize = 17.sp)
+                    if (kb != null && pg != null) {
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            KeyboardGrid(kb.cellsOf(pg.id), CellColors[0], CellColors[1], dimmed = true, showEmpty = true,
+                                images = catalog?.imageFiles().orEmpty(),
+                                onEmpty = { slot ->
+                                    val p = Product(vm.newProductId(), label.trim(), cents!!, vat, dest, level, category.trim().ifBlank { "Divers" },
+                                        subCategory = sub.trim().ifBlank { null }, imageId = imageId)
+                                    vm.createAndPlace(p, pg.id, slot) { vm.show(Screen.CATALOG) }
+                                },
+                                onCell = {})
+                        }
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PadKey("Précédent", Modifier.size(180.dp, 52.dp), color = NavySoft, textColor = Color.White, fontSize = 17.sp, enabled = step > 0) { step-- }
+            Spacer(Modifier.weight(1f))
+            if (step < steps.lastIndex) PadKey("Suivant", Modifier.size(180.dp, 52.dp), color = PayCash, textColor = Color.White, fontSize = 17.sp, enabled = canNext) {
+                if (step == 3 && pageId == null) {
+                    // propose par défaut la page qui porte le nom de la catégorie
+                    pageId = kb?.pages?.firstOrNull { it.name.equals(category.trim(), ignoreCase = true) }?.id
+                }
+                step++
+            }
+        }
+    }
+}

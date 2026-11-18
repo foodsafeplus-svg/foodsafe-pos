@@ -163,4 +163,45 @@ class PosRepositoryTest {
         try { repo.addProduct(o, "marie", p.getValue("eau"), null, "c"); fail() } catch (_: IllegalStateException) {}
         assertEquals(1, repo.snapshot(o)!!.order.lines.size)
     }
+
+    @Test fun commentairesEtSupplementsObligatoireEtAnnulation() {
+        val cat = runBlocking { repo.catalog.state.first() }
+        val cuisson = cat.groups.first { it.name == "Cuisson" }
+        val diluants = cat.groups.first { it.name == "Diluants" }
+        // la Cuisson devient obligatoire pour la Burrata (exemple), un diluant payant sur le vin (TVA suit le produit : 20 %)
+        repo.catalog.setProductGroups("paul", "burrata", listOf(cuisson.id))
+        val o = repo.openOrder("marie", "21").order.id
+        repo.addProduct(o, "marie", p.getValue("burrata"), null, "m1")
+        try { repo.sendToKitchen(o, "marie", "m2"); fail("envoi sans cuisson accepté") }
+        catch (e: IllegalStateException) { assertTrue(e.message!!.contains("Cuisson (Burrata)")) }
+
+        val burrata = repo.snapshot(o)!!.order.lines.single()
+        repo.addModifiers(o, "marie", burrata.id, listOf(cuisson.items.first { it.label == "Saignant" }), "m3")
+        repo.addProduct(o, "marie", p.getValue("vin"), null, "m4", listOf(diluants.items.first { it.label == "Coca" }))
+        repo.sendToKitchen(o, "marie", "m5")
+        val s = repo.snapshot(o)!!
+        assertEquals(listOf("Burrata", "Saignant", "Verre de vin", "Coca"), s.order.lines.map { it.label })
+        assertEquals(Cents(1100 + 550 + 100), s.priced.totalTtc)
+        assertEquals(BasisPoints(2000), s.order.lines.last().vatRate)
+        val cuisine = runBlocking { repo.tickets.first() }.first { it.destination == "CUISINE" }
+        assertTrue(cuisine.renderedText, cuisine.renderedText.contains("> Saignant"))
+
+        // annulation du vin : le Coca part avec
+        val vin = s.order.lines.first { it.label == "Verre de vin" }
+        repo.cancelLine(o, "marie", vin.id, "erreur", "m6", approverId = "paul")
+        assertEquals(Cents(1100), repo.snapshot(o)!!.priced.totalTtc)
+        repo.pay(o, "marie", PaymentMethod.CARD, Cents(1100), "m7")
+        assertTrue(repo.verifyJournal() is ChainVerification.Valid)
+    }
+
+    @Test fun groupesReservesAuResponsableEtJournalises() {
+        try { repo.catalog.saveGroup("marie", null, "Sauces", false, true); fail() } catch (_: fr.foodsafe.pos.app.data.ActionDenied) {}
+        val g = repo.catalog.saveGroup("paul", null, "Sauces", mandatory = false, multiple = true)
+        repo.catalog.saveItem("paul", fr.foodsafe.pos.app.data.ModifierItem("", g, "Béarnaise", Cents(150), null))
+        repo.catalog.deleteGroup("paul", g)
+        val st = runBlocking { repo.catalog.state.first() }
+        assertTrue(st.groups.none { it.id == g })
+        val types = db.dao().allJournal().map { it.type }
+        assertTrue(types.containsAll(listOf("MODIFIER_GROUP_CREATED", "MODIFIER_CREATED", "MODIFIER_GROUP_DELETED")))
+    }
 }

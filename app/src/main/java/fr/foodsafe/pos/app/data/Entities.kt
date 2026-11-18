@@ -38,6 +38,8 @@ data class OrderLineEntity(
     val cancelReason: String?,
     val cancelledBy: String?,
     val cancelledAt: Long?,
+    /** v4 : commentaire ou supplément rattaché à cette ligne parente. */
+    val parentLineId: String? = null,
 )
 
 /** Bon cuisine produit (aperçu ; deviendra un print_job dans la couche matérielle). */

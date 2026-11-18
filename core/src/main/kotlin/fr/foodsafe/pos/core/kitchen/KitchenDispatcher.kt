@@ -117,10 +117,14 @@ object KitchenDispatcher {
         val line = order.lines.firstOrNull { it.id == lineId } ?: throw NoSuchElementException("ligne $lineId")
         if (!line.isActive) throw KitchenRuleViolation("ligne déjà annulée")
         require(quantityMilli in 1..line.quantityMilli) { "quantité à annuler invalide" }
+        // Les commentaires et suppléments d'une ligne sont annulés avec elle.
+        val children = order.lines.filter { it.parentLineId == lineId && it.isActive }
+        if (children.isNotEmpty() && quantityMilli != line.quantityMilli) throw KitchenRuleViolation("annulez la ligne entière (elle porte des commentaires ou suppléments)")
+        val cancelledIds = setOf(lineId) + children.map { it.id }
 
         val cancellation = Cancellation(reason.trim(), actorId, now)
         val newLines = if (quantityMilli == line.quantityMilli) {
-            order.lines.map { if (it.id == lineId) it.copy(cancellation = cancellation) else it }
+            order.lines.map { if (it.id in cancelledIds) it.copy(cancellation = cancellation) else it }
         } else {
             // Annulation partielle : la ligne d'origine garde le reste, une ligne annulée trace la part retirée.
             order.lines.flatMap {
@@ -136,7 +140,8 @@ object KitchenDispatcher {
                 destination = line.destination,
                 kind = KitchenTicketKind.CANCELLATION,
                 tableLabel = tableLabel(order),
-                items = listOf(KitchenItem(quantityMilli, line.label, line.level)),
+                items = listOf(KitchenItem(quantityMilli, line.label, line.level, modifier = line.isModifier)) +
+                    children.filter { it.isSent }.map { it.toItem() },
                 inverse = true,
             ),
         ) else emptyList()
@@ -164,5 +169,5 @@ object KitchenDispatcher {
         return DispatchResult(order.copy(tableNumber = newTable).bumped(), tickets)
     }
 
-    private fun OrderLine.toItem() = KitchenItem(quantityMilli, label, level)
+    private fun OrderLine.toItem() = KitchenItem(quantityMilli, label, level, modifier = isModifier)
 }

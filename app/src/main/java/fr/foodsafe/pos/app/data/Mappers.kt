@@ -36,6 +36,7 @@ fun OrderLineEntity.toDomain() = OrderLine(
     },
     dispatchId = dispatchId,
     cancellation = cancelReason?.let { Cancellation(it, cancelledBy!!, cancelledAt!!) },
+    parentLineId = parentLineId,
 )
 
 fun Order.toEntity(openedAt: Long) = OrderEntity(
@@ -53,6 +54,7 @@ fun OrderLine.toEntity(orderId: String, position: Int) = OrderLineEntity(
     lineDiscountValue = when (val d = lineDiscount) { is LineDiscount.Percent -> d.rate.value.toLong(); is LineDiscount.Amount -> d.amount.value; null -> null },
     dispatchId = dispatchId,
     cancelReason = cancellation?.reason, cancelledBy = cancellation?.byEmployeeId, cancelledAt = cancellation?.at,
+    parentLineId = parentLineId,
 )
 
 fun JournalEventEntity.toDomain() = JournalEvent(

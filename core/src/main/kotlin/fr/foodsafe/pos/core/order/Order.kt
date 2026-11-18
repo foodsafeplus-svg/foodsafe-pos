@@ -36,8 +36,14 @@ data class OrderLine(
     /** Renseigné quand la ligne a été transmise en cuisine. Une ligne envoyée n'est JAMAIS renvoyée. */
     val dispatchId: String? = null,
     val cancellation: Cancellation? = null,
+    /**
+     * Commentaire ou supplément rattaché à une ligne produit (« Saignant », « + Œuf »). Il suit le niveau,
+     * la destination et l'envoi de sa ligne parente, et il est annulé avec elle.
+     */
+    val parentLineId: String? = null,
 ) {
     init { require(quantityMilli > 0) { "quantité strictement positive" } }
+    val isModifier get() = parentLineId != null
     val isSent get() = dispatchId != null
     val isActive get() = cancellation == null
 }

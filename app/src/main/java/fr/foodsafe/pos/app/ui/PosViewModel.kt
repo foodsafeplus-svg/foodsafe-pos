@@ -9,6 +9,7 @@ import fr.foodsafe.pos.app.data.ApprovalRequired
 import fr.foodsafe.pos.app.data.OrderSnapshot
 import fr.foodsafe.pos.app.data.PosRepository
 import fr.foodsafe.pos.app.data.Product
+import fr.foodsafe.pos.app.data.ModifierItem
 import fr.foodsafe.pos.app.data.toDomain
 import fr.foodsafe.pos.core.auth.Employee
 import fr.foodsafe.pos.core.auth.LoginResult
@@ -38,7 +39,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR, CATALOG, KEYBOARDS, PRODUCTS, IMAGES, WIZARD }
+enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR, CATALOG, KEYBOARDS, PRODUCTS, IMAGES, WIZARD, MODIFIERS }
 
 data class TableSummary(val orderId: String, val table: String, val ownerId: String, val status: OrderStatus, val total: Cents)
 
@@ -126,6 +127,12 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     fun clearCell(pageId: String, slot: Int) = catalogEdit { repo.catalog.clearCell(it, pageId, slot) }
     fun createAndPlace(p: Product, pageId: String, slot: Int, onDone: () -> Unit) =
         act<Product>("Produit « ${p.label} » créé et placé", onSuccess = { onDone() }) { _, _ -> repo.catalog.createAndPlace(userId(), p, pageId, slot) }
+    fun saveGroup(id: String?, name: String, mandatory: Boolean, multiple: Boolean, onDone: (String) -> Unit = {}) =
+        act<String>("Groupe enregistré", onSuccess = onDone) { _, _ -> repo.catalog.saveGroup(userId(), id, name, mandatory, multiple) }
+    fun deleteGroup(id: String) = catalogEdit("Groupe supprimé") { repo.catalog.deleteGroup(it, id) }
+    fun saveModifier(item: ModifierItem) = catalogEdit("Élément enregistré") { repo.catalog.saveItem(it, item) }
+    fun deleteModifier(id: String) = catalogEdit("Élément supprimé") { repo.catalog.deleteItem(it, id) }
+    fun setProductGroups(productId: String, groupIds: List<String>) = catalogEdit { repo.catalog.setProductGroups(it, productId, groupIds) }
     fun deleteImage(id: String) = catalogEdit("Image supprimée") { repo.catalog.deleteImage(it, id) }
 
     /** Importe une image choisie sur la tablette : réduite à 256 px max, enregistrée en JPEG dans le stockage privé. */
@@ -255,7 +262,10 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Commande ----------
 
     fun selectLevel(level: ServiceLevel?) { touch(); _state.value = _state.value.copy(selectedLevel = level) }
-    fun add(p: Product) = act(onSuccess = ::update) { k, _ -> repo.addProduct(orderId(), userId(), p, _state.value.selectedLevel, k) }
+    fun add(p: Product, modifiers: List<ModifierItem> = emptyList()) =
+        act(onSuccess = ::update) { k, _ -> repo.addProduct(orderId(), userId(), p, _state.value.selectedLevel, k, modifiers) }
+    fun addModifiers(lineId: String, modifiers: List<ModifierItem>) =
+        act(onSuccess = ::update) { k, _ -> repo.addModifiers(orderId(), userId(), lineId, modifiers, k) }
     fun send() = act("Commande envoyée en cuisine", onSuccess = ::update) { k, _ -> repo.sendToKitchen(orderId(), userId(), k) }
 
     /** Après réclamation : note en attente et retour au plan des tables. */

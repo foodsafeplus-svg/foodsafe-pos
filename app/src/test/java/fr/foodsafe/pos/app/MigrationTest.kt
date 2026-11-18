@@ -38,4 +38,15 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM products").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         db.query("SELECT COUNT(*) FROM keyboard_cells").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
     }
+
+    @Test fun migration3vers4AjouteCommentairesEtSupplements() {
+        helper.createDatabase("migr4.db", 3).apply {
+            execSQL("INSERT INTO order_lines (id, orderId, position, productId, label, unitPriceTtc, quantityMilli, vatRateBp, serviceLevel, destination, authorEmployeeId, createdAt) " +
+                "VALUES ('l1','o1',0,'reine','Pizza Reine',1350,1000,1000,2,'CUISINE','marie',1)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate("migr4.db", 4, true)
+        db.query("SELECT label, parentLineId FROM order_lines").use { it.moveToFirst(); assertEquals("Pizza Reine", it.getString(0)); assert(it.isNull(1)) }
+        db.query("SELECT COUNT(*) FROM modifier_groups").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+    }
 }

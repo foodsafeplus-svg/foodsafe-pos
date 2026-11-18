@@ -63,7 +63,7 @@ internal fun parsePrice(s: String): Cents? =
     s.trim().replace(',', '.').toBigDecimalOrNull()?.takeIf { it.signum() >= 0 && it.scale() <= 2 }?.movePointRight(2)?.toLong()?.let(::Cents)
 
 @Composable
-private fun ScreenHeader(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}) {
+internal fun ScreenHeader(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         PadKey("← Retour", Modifier.size(120.dp, 44.dp), color = NavySoft, textColor = Color.White, fontSize = 16.sp, onClick = onBack)
         Text(title, Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Navy, textAlign = TextAlign.Center)
@@ -87,7 +87,7 @@ internal fun CatalogHubScreen(vm: PosViewModel) {
         T("Assistant création produit", "+", Color(0xFFD62850), Screen.WIZARD),
         T("Images", "▣", Color(0xFF3F8FE0), Screen.IMAGES),
         T("Claviers", "#", Color(0xFF7A2E2E), Screen.KEYBOARDS),
-        T("Commentaires et suppléments", "✎", Color(0xFF2F55C8), null),
+        T("Commentaires et suppléments", "✎", Color(0xFF2F55C8), Screen.MODIFIERS),
         T("Formules", "F", Color(0xFF43A047), null),
         T("Tous les produits", "≡", Color(0xFF5B3CC4), Screen.PRODUCTS),
     )
@@ -315,7 +315,9 @@ internal fun ProductsScreen(vm: PosViewModel) {
     }
     editing?.let { p ->
         ProductDialog(p, catalog?.categories.orEmpty(), isNew = products.none { it.id == p.id },
-            onSave = { vm.saveProduct(it); editing = null }, onDismiss = { editing = null }, images = catalog?.images.orEmpty())
+            onSave = { vm.saveProduct(it); editing = null }, onDismiss = { editing = null }, images = catalog?.images.orEmpty(),
+            groups = catalog?.groups.orEmpty(), initialGroups = catalog?.productGroups?.get(p.id).orEmpty(),
+            onSaveGroups = { vm.setProductGroups(p.id, it) })
     }
 }
 
@@ -324,7 +326,11 @@ internal fun ProductsScreen(vm: PosViewModel) {
 internal fun ProductDialog(
     initial: Product, categories: List<String>, isNew: Boolean, onSave: (Product) -> Unit, onDismiss: () -> Unit,
     images: List<fr.foodsafe.pos.app.data.CatalogImage> = emptyList(),
+    groups: List<fr.foodsafe.pos.app.data.ModifierGroup> = emptyList(),
+    initialGroups: List<String> = emptyList(),
+    onSaveGroups: (List<String>) -> Unit = {},
 ) {
+    var groupIds by remember { mutableStateOf(initialGroups) }
     var imageId by remember { mutableStateOf(initial.imageId) }
     var label by remember { mutableStateOf(initial.label) }
     var price by remember { mutableStateOf(if (isNew) "" else initial.price.format(false).replace(" ", "")) }
@@ -364,6 +370,12 @@ internal fun ProductDialog(
                     Text("Image du bouton", fontSize = 13.sp, color = Muted)
                     ImagePicker(images, imageId) { imageId = it }
                 }
+                if (groups.isNotEmpty()) {
+                    Text("Commentaires et suppléments proposés à la vente", fontSize = 13.sp, color = Muted)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        groups.forEach { g -> Chip(g.name + if (g.mandatory) " *" else "", g.id in groupIds) { groupIds = if (g.id in groupIds) groupIds - g.id else groupIds + g.id } }
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Chip("Actif", active) { active = true }
                     Chip("Inactif (retiré de la vente)", !active) { active = false }
@@ -375,7 +387,7 @@ internal fun ProductDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(initial.copy(label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null }, defaultLevel = level, destination = dest, active = active, imageId = imageId)) },
+                onClick = { if (groupIds != initialGroups) onSaveGroups(groupIds); onSave(initial.copy(label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null }, defaultLevel = level, destination = dest, active = active, imageId = imageId)) },
                 enabled = label.isNotBlank() && cents != null,
             ) { Text("Enregistrer") }
         },

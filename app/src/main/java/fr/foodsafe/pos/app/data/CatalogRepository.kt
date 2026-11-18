@@ -24,7 +24,21 @@ data class Keyboard(val id: String, val name: String, val pages: List<KeyboardPa
 
 data class CatalogImage(val id: String, val name: String, val file: java.io.File?)
 
-data class CatalogState(val products: List<Product>, val keyboards: List<Keyboard>, val images: List<CatalogImage> = emptyList()) {
+/** Élément de commentaire ou de supplément. [vat] null : la TVA suit celle du produit auquel il est rattaché. */
+data class ModifierItem(val id: String, val groupId: String, val label: String, val price: Cents, val vat: BasisPoints?) {
+    val isFree get() = price.isZero
+}
+
+data class ModifierGroup(val id: String, val name: String, val mandatory: Boolean, val multiple: Boolean, val items: List<ModifierItem>)
+
+data class CatalogState(
+    val products: List<Product>, val keyboards: List<Keyboard>, val images: List<CatalogImage> = emptyList(),
+    val groups: List<ModifierGroup> = emptyList(),
+    /** Produit → groupes proposés à la vente, dans l'ordre. */
+    val productGroups: Map<String, List<String>> = emptyMap(),
+) {
+    fun groupsFor(productId: String): List<ModifierGroup> =
+        productGroups[productId].orEmpty().mapNotNull { id -> groups.firstOrNull { it.id == id } }
     fun image(id: String?): CatalogImage? = id?.let { i -> images.firstOrNull { it.id == i } }
     val categories: List<String> get() = products.map { it.category }.distinct()
     fun keyboard(id: String?): Keyboard? = keyboards.firstOrNull { it.id == id } ?: keyboards.firstOrNull()
@@ -45,10 +59,20 @@ class CatalogRepository internal constructor(
 ) {
     private val dao = db.catalogDao()
 
+    private val modifiers: Flow<Pair<List<ModifierGroup>, Map<String, List<String>>>> =
+        combine(dao.observeGroups(), dao.observeItems(), dao.observeProductGroups()) { g, i, links ->
+            val items = i.map { ModifierItem(it.id, it.groupId, it.label, Cents(it.priceCents), it.vatBp?.let(::BasisPoints)) }.groupBy { it.groupId }
+            g.map { ModifierGroup(it.id, it.name, it.mandatory, it.multiple, items[it.id].orEmpty()) } to
+                links.groupBy({ it.productId }, { it.groupId })
+        }
+
     val state: Flow<CatalogState> = combine(
         combine(dao.observeProducts(), dao.observeKeyboards(), dao.observePages(), dao.observeCells()) { p, k, pg, c -> build(p, k, pg, c) },
         dao.observeImages(),
-    ) { st, imgs -> st.copy(images = imgs.map { CatalogImage(it.id, it.name, imagesDir?.let { d -> java.io.File(d, it.fileName) }) }) }
+        modifiers,
+    ) { st, imgs, (groups, links) ->
+        st.copy(images = imgs.map { CatalogImage(it.id, it.name, imagesDir?.let { d -> java.io.File(d, it.fileName) }) }, groups = groups, productGroups = links)
+    }
 
     private fun build(p: List<ProductEntity>, k: List<KeyboardEntity>, pg: List<KeyboardPageEntity>, c: List<KeyboardCellEntity>): CatalogState {
         val products = p.map { it.toDomain() }
@@ -79,6 +103,90 @@ class CatalogRepository internal constructor(
             dao.upsertCells(DemoCatalog.products.filter { it.category == cat }.mapIndexed { slot, p -> KeyboardCellEntity(page.id, slot, "PRODUCT", p.id, null) })
         }
     }
+
+    /**
+     * Exemples de commentaires et suppléments, posés une seule fois (aussi sur une caisse déjà en service).
+     * Un groupe supprimé reste en base (masqué) : l'exemple ne revient donc jamais.
+     */
+    fun seedModifiersIfEmpty() = db.runInTransaction {
+        if (dao.allGroups().isNotEmpty()) return@runInTransaction
+        fun group(id: String, name: String, mandatory: Boolean, multiple: Boolean, pos: Int, vararg items: Pair<String, Long>) {
+            dao.upsertGroup(ModifierGroupEntity(id, name, mandatory, multiple, pos, false))
+            items.forEachIndexed { i, (label, cents) -> dao.upsertItem(ModifierItemEntity("$id-${i + 1}", id, label, cents, null, i)) }
+        }
+        group("grp-cuisson", "Cuisson", mandatory = true, multiple = false, 0, "Bleu" to 0, "Saignant" to 0, "À point" to 0, "Bien cuit" to 0)
+        group("grp-pizza", "Suppléments pizza", mandatory = false, multiple = true, 1, "Œuf" to 100, "Jambon" to 200, "Mozzarella" to 150, "Sans olives" to 0, "Bien cuite" to 0)
+        group("grp-diluants", "Diluants", mandatory = false, multiple = false, 2, "Coca" to 100, "Perrier" to 100, "Jus d'orange" to 100, "Sec" to 0)
+        val pizzas = dao.products().filter { it.category == "Pizzas" }.map { it.id }
+        dao.upsertProductGroups(pizzas.map { ProductModifierGroupEntity(it, "grp-pizza", 0) })
+    }
+
+    // ---------- Commentaires et suppléments ----------
+
+    fun saveGroup(actorId: String, id: String?, name: String, mandatory: Boolean, multiple: Boolean): String {
+        requireRight(actorId)
+        require(name.isNotBlank()) { "nom du groupe requis" }
+        return db.runInTransaction<String> {
+            val before = id?.let(dao::group)
+            val gid = before?.id ?: ("grp-" + ids())
+            val e = ModifierGroupEntity(gid, name.trim(), mandatory, multiple, before?.position ?: dao.allGroups().size, false)
+            dao.upsertGroup(e)
+            log(actorId, if (before == null) "MODIFIER_GROUP_CREATED" else "MODIFIER_GROUP_UPDATED", "modifier_group", gid,
+                before?.let { JSONObject().put("name", it.name).put("mandatory", it.mandatory).put("multiple", it.multiple).toString() },
+                JSONObject().put("name", e.name).put("mandatory", mandatory).put("multiple", multiple).toString())
+            gid
+        }
+    }
+
+    /** Masque le groupe et le détache des produits ; les notes déjà saisies gardent leurs lignes. */
+    fun deleteGroup(actorId: String, id: String) {
+        requireRight(actorId)
+        db.runInTransaction {
+            val g = dao.group(id) ?: error("groupe inconnu")
+            dao.upsertGroup(g.copy(deleted = true)); dao.unlinkGroup(id)
+            log(actorId, "MODIFIER_GROUP_DELETED", "modifier_group", id, g.name, null)
+        }
+    }
+
+    fun saveItem(actorId: String, item: ModifierItem): String {
+        requireRight(actorId)
+        require(item.label.isNotBlank()) { "libellé requis" }
+        require(!item.price.isNegative) { "prix négatif" }
+        return db.runInTransaction<String> {
+            val before = dao.item(item.id)
+            val id = before?.id ?: ("mod-" + ids())
+            val e = ModifierItemEntity(id, item.groupId, item.label.trim(), item.price.value, item.vat?.value, before?.position ?: dao.items(item.groupId).size)
+            dao.upsertItem(e)
+            log(actorId, if (before == null) "MODIFIER_CREATED" else "MODIFIER_UPDATED", "modifier", id, before?.summary(), e.summary())
+            id
+        }
+    }
+
+    fun deleteItem(actorId: String, id: String) {
+        requireRight(actorId)
+        db.runInTransaction {
+            val before = dao.item(id) ?: error("élément inconnu")
+            dao.deleteItem(id)
+            log(actorId, "MODIFIER_DELETED", "modifier", id, before.summary(), null)
+        }
+    }
+
+    fun setProductGroups(actorId: String, productId: String, groupIds: List<String>) {
+        requireRight(actorId)
+        db.runInTransaction {
+            val before = dao.productGroups(productId).map { it.groupId }
+            if (before == groupIds) return@runInTransaction
+            dao.clearProductGroups(productId)
+            dao.upsertProductGroups(groupIds.distinct().mapIndexed { i, g -> ProductModifierGroupEntity(productId, g, i) })
+            log(actorId, "PRODUCT_UPDATED", "product", productId, "groupes=" + before.joinToString(","), "groupes=" + groupIds.joinToString(","))
+        }
+    }
+
+    /** Groupes obligatoires d'un produit sans aucun choix parmi [chosenItemIds]. */
+    fun missingMandatory(productId: String, chosenItemIds: Collection<String>): List<String> =
+        dao.productGroups(productId).mapNotNull { link -> dao.group(link.groupId)?.takeIf { it.mandatory && !it.deleted } }
+            .filter { g -> dao.items(g.id).none { it.id in chosenItemIds } }
+            .map { it.name }
 
     // ---------- Produits ----------
 
@@ -212,3 +320,6 @@ private fun ProductEntity.summary() = JSONObject()
     .put("label", label).put("priceCents", priceCents).put("vatBp", vatBp).put("category", category)
     .put("subCategory", subCategory ?: "").put("level", defaultLevel).put("destination", destination).put("active", active)
     .toString()
+
+private fun ModifierItemEntity.summary() = JSONObject()
+    .put("groupId", groupId).put("label", label).put("priceCents", priceCents).put("vatBp", vatBp ?: JSONObject.NULL).toString()

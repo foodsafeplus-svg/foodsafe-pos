@@ -63,7 +63,9 @@ class OrderScreenUiTest {
 
         rule.onNodeWithText("Salade César").performClick(); waitText("NET À PAYER : 9,50 €")
         rule.onNodeWithText("PIZZAS").performClick()
-        rule.onNodeWithText("Pizza Margherita").performClick(); waitText("NET À PAYER : 21,50 €")
+        rule.onNodeWithText("Pizza Margherita").performClick()
+        waitText("Suppléments pizza", substring = true) // groupe facultatif : on valide sans choix
+        rule.onNodeWithText("Valider").performClick(); waitText("NET À PAYER : 21,50 €")
         rule.onNodeWithText("ALCOOLS").performClick()
         rule.onNodeWithText("Bière pression").performClick(); waitText("NET À PAYER : 27,50 €")
         rule.onNodeWithText("ENVOYER COMMANDE").performClick()
@@ -238,6 +240,55 @@ class OrderScreenUiTest {
         rule.onNodeWithText("DESSERTS").performClick()
         rule.onNodeWithText("Café gourmand").performClick()
         waitText("NET À PAYER : 7,90 €")
+    }
+
+    @Test fun commentairesEtSupplementsEnVente() {
+        waitText("Saisissez votre code PIN")
+        pin("1111")
+        waitText("Nouvelle table")
+        rule.onNodeWithText("Nouvelle table").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput("8")
+        rule.onNodeWithText("Ouvrir").performClick()
+        waitText("Niveau produit")
+        waitText("Salade César")
+        rule.onNodeWithText("PIZZAS").performClick()
+        rule.onNodeWithText("Pizza Reine").performClick()
+        waitText("Suppléments pizza", substring = true)
+        rule.onNodeWithText("Œuf +1,00").performClick()
+        rule.onNodeWithText("Sans olives").performClick()
+        waitText("Suppléments : +1,00 €")
+        rule.onNodeWithText("Valider").performClick()
+        waitText("NET À PAYER : 14,50 €")
+        waitText("    > Sans olives")
+        // commentaire ajouté après coup sur la ligne (groupes du produit)
+        rule.onAllNodesWithText("Pizza Reine")[0].performClick() // la ligne de la note
+        rule.onNodeWithText("COMMENTAIRE").performClick()
+        waitText("Suppléments pizza · plusieurs choix")
+        rule.onNodeWithText("Bien cuite").performClick()
+        rule.onNodeWithText("Valider").performClick()
+        waitText("    > Bien cuite")
+        rule.onNodeWithText("ENVOYER COMMANDE").performClick()
+        waitText("Commande envoyée en cuisine")
+        capture("12-note-avec-supplements")
+    }
+
+    @Test fun ecranCommentairesEtSupplements() {
+        waitText("Saisissez votre code PIN")
+        pin("9999")
+        waitText("Nouvelle table")
+        rule.onNodeWithText("ACCUEIL").performClick()
+        rule.onNodeWithText("PRODUITS ET CLAVIERS").performClick()
+        rule.onNodeWithText("COMMENTAIRES ET SUPPLÉMENTS").performClick()
+        waitText("CUISSON")
+        rule.onNodeWithText("Diluants").performClick()
+        waitText("DILUANTS")
+        rule.onNodeWithText("+ Nouvel élément").performClick()
+        rule.onNode(hasSetTextAction() and hasText("Libellé")).performTextInput("Schweppes")
+        rule.onNode(hasSetTextAction() and hasText("Prix (vide = gratuit)")).performTextInput("1,20")
+        rule.onNodeWithText("Enregistrer").performClick()
+        waitText("Schweppes")
+        waitText("+1,20 €")
+        capture("13-commentaires-supplements")
     }
 
     private fun productCount(): Int = rule.onAllNodes(hasText("TOUS LES PRODUITS (", substring = true)).fetchSemanticsNodes()

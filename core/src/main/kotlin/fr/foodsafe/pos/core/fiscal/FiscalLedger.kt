@@ -211,8 +211,9 @@ object FiscalVerifier {
     }
 }
 
-fun PricedOrder.toFiscalLines() = lines.map {
-    FiscalLine(it.line.label, it.line.quantityMilli, it.line.unitPriceTtc, it.gross, it.lineDiscount + it.ticketDiscount, it.net, it.line.vatRate)
+/** Les commentaires gratuits (« Saignant ») ne vont qu'en cuisine ; un supplément payant figure sur le ticket (« + Œuf »). */
+fun PricedOrder.toFiscalLines() = lines.filter { !(it.line.isModifier && it.gross.isZero) }.map {
+    FiscalLine(if (it.line.isModifier) "+ " + it.line.label else it.line.label, it.line.quantityMilli, it.line.unitPriceTtc, it.gross, it.lineDiscount + it.ticketDiscount, it.net, it.line.vatRate)
 }
 
 private fun List<Payment>.toFiscalPayments() = map { FiscalPayment(it.method, it.amount) }

@@ -27,7 +27,7 @@ object KitchenTicketRenderer {
                 out += item.level.label
                 currentLevel = item.level.value
             }
-            out += "${formatQty(item.quantityMilli)} x ${item.label}".take(columns)
+            out += (if (item.modifier) "    > ${item.label}" else "${formatQty(item.quantityMilli)} x ${item.label}").take(columns)
         }
         out += sep
         return out

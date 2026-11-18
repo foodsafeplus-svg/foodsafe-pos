@@ -56,3 +56,36 @@ data class ImageEntity(
     val fileName: String,
     val createdAt: Long,
 )
+
+/**
+ * Groupe de commentaires et suppléments (ex. « Cuisson », « Diluants »). Obligatoire : la commande ne part pas
+ * en cuisine sans un choix. Plusieurs : on peut cocher plusieurs éléments. Supprimé : masqué, gardé pour l'historique.
+ */
+@Entity(tableName = "modifier_groups")
+data class ModifierGroupEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val mandatory: Boolean,
+    val multiple: Boolean,
+    val position: Int,
+    val deleted: Boolean,
+)
+
+/** Élément d'un groupe : gratuit (commentaire) ou payant (supplément). vatBp null = la TVA suit celle du produit. */
+@Entity(tableName = "modifier_items", indices = [Index("groupId")])
+data class ModifierItemEntity(
+    @PrimaryKey val id: String,
+    val groupId: String,
+    val label: String,
+    val priceCents: Long,
+    val vatBp: Int?,
+    val position: Int,
+)
+
+/** Groupes proposés à la vente d'un produit, dans l'ordre. */
+@Entity(tableName = "product_modifier_groups", primaryKeys = ["productId", "groupId"])
+data class ProductModifierGroupEntity(
+    val productId: String,
+    val groupId: String,
+    val position: Int,
+)

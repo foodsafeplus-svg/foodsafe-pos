@@ -36,4 +36,19 @@ interface CatalogDao {
     @Upsert fun upsertImage(i: ImageEntity)
     @Query("SELECT * FROM images WHERE id = :id") fun imageById(id: String): ImageEntity?
     @Delete fun deleteImage(i: ImageEntity)
+
+    @Query("SELECT * FROM modifier_groups WHERE deleted = 0 ORDER BY position") fun observeGroups(): Flow<List<ModifierGroupEntity>>
+    @Query("SELECT * FROM modifier_groups ORDER BY position") fun allGroups(): List<ModifierGroupEntity>
+    @Query("SELECT * FROM modifier_groups WHERE id = :id") fun group(id: String): ModifierGroupEntity?
+    @Upsert fun upsertGroup(g: ModifierGroupEntity)
+    @Query("SELECT * FROM modifier_items ORDER BY groupId, position") fun observeItems(): Flow<List<ModifierItemEntity>>
+    @Query("SELECT * FROM modifier_items WHERE groupId = :groupId ORDER BY position") fun items(groupId: String): List<ModifierItemEntity>
+    @Query("SELECT * FROM modifier_items WHERE id = :id") fun item(id: String): ModifierItemEntity?
+    @Upsert fun upsertItem(i: ModifierItemEntity)
+    @Query("DELETE FROM modifier_items WHERE id = :id") fun deleteItem(id: String)
+    @Query("SELECT * FROM product_modifier_groups ORDER BY productId, position") fun observeProductGroups(): Flow<List<ProductModifierGroupEntity>>
+    @Query("SELECT * FROM product_modifier_groups WHERE productId = :productId ORDER BY position") fun productGroups(productId: String): List<ProductModifierGroupEntity>
+    @Upsert fun upsertProductGroups(l: List<ProductModifierGroupEntity>)
+    @Query("DELETE FROM product_modifier_groups WHERE productId = :productId") fun clearProductGroups(productId: String)
+    @Query("DELETE FROM product_modifier_groups WHERE groupId = :groupId") fun unlinkGroup(groupId: String)
 }

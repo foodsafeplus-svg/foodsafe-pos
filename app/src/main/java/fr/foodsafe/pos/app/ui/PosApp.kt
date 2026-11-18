@@ -70,6 +70,7 @@ import fr.foodsafe.pos.app.data.JournalEventEntity
 import fr.foodsafe.pos.app.data.KitchenTicketEntity
 import fr.foodsafe.pos.app.data.OrderSnapshot
 import fr.foodsafe.pos.app.data.PosRepository
+import fr.foodsafe.pos.app.data.Product
 import fr.foodsafe.pos.core.fiscal.FiscalDocType
 import fr.foodsafe.pos.core.fiscal.FiscalVerification
 import fr.foodsafe.pos.core.journal.ChainVerification
@@ -282,6 +283,7 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
                 Screen.PRODUCTS -> ProductsScreen(vm)
                 Screen.IMAGES -> ImagesScreen(vm)
                 Screen.WIZARD -> ProductWizardScreen(vm)
+                Screen.MODIFIERS -> ModifiersScreen(vm)
             }
         }
     }
@@ -337,6 +339,8 @@ private fun OrderScreen(s: OrderSnapshot, selectedLevel: ServiceLevel?, vm: PosV
     var showDiscount by remember { mutableStateOf(false) }
     var paying by remember(s.order.id) { mutableStateOf(false) }
     var selectedLineId by remember(s.order.id) { mutableStateOf<String?>(null) }
+    var commentLine by remember { mutableStateOf<OrderLine?>(null) }
+    val catalog by vm.catalog.collectAsStateWithLifecycle()
     val paid = s.order.status == OrderStatus.PAID
     // Ligne visée par « Supprimer ligne » : celle touchée, sinon la dernière ligne active.
     val targetLine = s.order.lines.firstOrNull { it.id == selectedLineId && it.isActive } ?: s.order.activeLines.lastOrNull()
@@ -356,11 +360,19 @@ private fun OrderScreen(s: OrderSnapshot, selectedLevel: ServiceLevel?, vm: PosV
         if (paying && !paid) {
             PaymentPanel(s, Modifier.weight(0.60f), onBack = { paying = false }, onDiscount = { showDiscount = true }, vm = vm)
         } else {
-            ActionColumn(s, Modifier.width(118.dp), onCancelLine = { targetLine?.let { cancelTarget = it } }, onDiscount = { showDiscount = true }, vm = vm)
+            // « Commentaire » : sur la ligne produit visée (ou la ligne parente d'un commentaire), tant qu'elle n'est pas envoyée
+            val commentTarget = targetLine?.let { t -> if (t.isModifier) s.order.lines.firstOrNull { it.id == t.parentLineId } else t }?.takeIf { !it.isSent && it.isActive }
+            ActionColumn(s, Modifier.width(118.dp), onCancelLine = { targetLine?.let { cancelTarget = it } }, onDiscount = { showDiscount = true },
+                onComment = commentTarget?.let { t -> { commentLine = t } }, vm = vm)
             ProductPanel(paid, selectedLevel, Modifier.weight(0.60f), vm)
         }
     }
     cancelTarget?.let { line -> CancelDialog(line, onDismiss = { cancelTarget = null }) { reason -> vm.cancel(line.id, reason); cancelTarget = null } }
+    commentLine?.let { line ->
+        // groupes du produit, sinon tous les groupes (commentaire libre choisi dans la liste)
+        val groups = catalog?.groupsFor(line.productId).orEmpty().ifEmpty { catalog?.groups.orEmpty() }
+        ModifierDialog(line.label, groups.map { it.copy(mandatory = false) }, onDismiss = { commentLine = null }) { vm.addModifiers(line.id, it); commentLine = null }
+    }
     if (showDiscount) DiscountDialog(onDismiss = { showDiscount = false }) { vm.ticketDiscount(it); showDiscount = false }
 }
 
@@ -391,7 +403,7 @@ private fun TicketPanel(s: OrderSnapshot, modifier: Modifier, selectedLineId: St
                     Text(full.format(Date(now)), color = Color.White, fontSize = 13.sp)
                 } else {
                     Text("À PAYER : ${priced.totalTtc.format()}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text("NB ART : ${s.order.activeLines.size} · ${s.order.ownerEmployeeId}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    Text("NB ART : ${s.order.activeLines.count { !it.isModifier }} · ${s.order.ownerEmployeeId}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                 }
             }
         }
@@ -414,11 +426,16 @@ private fun TicketPanel(s: OrderSnapshot, modifier: Modifier, selectedLineId: St
                             Text(l.authorEmployeeId.uppercase().take(6), fontSize = 8.sp, color = Muted, maxLines = 1)
                             Text(hour.format(Date(l.createdAt)), fontSize = 8.sp, color = Muted)
                         }
-                        Text(KitchenTicketRenderer.formatQty(l.quantityMilli), Modifier.width(22.dp), fontWeight = FontWeight.Bold)
-                        Text(l.label, Modifier.weight(1f), fontSize = 14.sp, maxLines = 1)
-                        Text("PU ${l.unitPriceTtc.format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
+                        if (l.isModifier) {
+                            Text("    > ${l.label}", Modifier.weight(1f).padding(start = 22.dp), fontSize = 13.sp, color = FsBlue, maxLines = 1)
+                            Text(if (pl.gross.isZero) "" else "PU ${l.unitPriceTtc.format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
+                        } else {
+                            Text(KitchenTicketRenderer.formatQty(l.quantityMilli), Modifier.width(22.dp), fontWeight = FontWeight.Bold)
+                            Text(l.label, Modifier.weight(1f), fontSize = 14.sp, maxLines = 1)
+                            Text("PU ${l.unitPriceTtc.format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
+                        }
                         if (pl.gross != pl.net) Text(pl.gross.format(false) + " ", textDecoration = TextDecoration.LineThrough, color = Muted, fontSize = 11.sp)
-                        Text(pl.net.format(false), Modifier.width(50.dp), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
+                        Text(if (l.isModifier && pl.gross.isZero) "" else pl.net.format(false), Modifier.width(50.dp), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
                         Text(if (l.isSent) "E" else "", Modifier.width(16.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E9E4F), textAlign = TextAlign.End)
                     }
                     HorizontalDivider(color = TicketBg)
@@ -501,7 +518,7 @@ private fun typeAmount(entry: String, k: String): String = when {
 
 /** Colonne noire d'actions sur la note. Seules les actions réellement disponibles y figurent. */
 @Composable
-private fun ActionColumn(s: OrderSnapshot, modifier: Modifier, onCancelLine: () -> Unit, onDiscount: () -> Unit, vm: PosViewModel) {
+private fun ActionColumn(s: OrderSnapshot, modifier: Modifier, onCancelLine: () -> Unit, onDiscount: () -> Unit, onComment: (() -> Unit)?, vm: PosViewModel) {
     val paid = s.order.status == OrderStatus.PAID
     val hasLines = s.order.activeLines.isNotEmpty()
     val nextClaim = KitchenDispatcher.nextClaimableLevel(s.order)
@@ -509,6 +526,7 @@ private fun ActionColumn(s: OrderSnapshot, modifier: Modifier, onCancelLine: () 
         FunctionButton("➜", Color(0xFF2E9E4F), "Envoyer commande", enabled = !paid, onClick = vm::send)
         if (nextClaim != null && !paid) FunctionButton("N", Color(0xFF7B4FD6), "Réclamer ${nextClaim.label}", onClick = vm::claim)
         FunctionButton("−", Accent, "Supprimer ligne", enabled = !paid && hasLines, onClick = onCancelLine)
+        FunctionButton("✎", Color(0xFF2F55C8), "Commentaire", enabled = !paid && onComment != null, onClick = { onComment?.invoke() })
         FunctionButton("%", Color(0xFF1FB5A8), "Remise note %", enabled = !paid, onClick = onDiscount)
         FunctionButton("≡", Color(0xFFF08A30), "Imprimer la note", enabled = !paid && hasLines, onClick = vm::printNote)
     }
@@ -547,6 +565,10 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
     val keyboard = catalog?.keyboard(keyboardId)
     val tabs = keyboard?.visiblePages.orEmpty()
     val page = keyboard?.pages?.firstOrNull { it.id == pageId } ?: tabs.firstOrNull()
+    var asking by remember { mutableStateOf<Product?>(null) }
+    asking?.let { p ->
+        ModifierDialog(p.label, catalog?.groupsFor(p.id).orEmpty(), onDismiss = { asking = null }) { vm.add(p, it); asking = null }
+    }
     Column(modifier.fillMaxHeight().background(Color.White).padding(6.dp)) {
         // Pages visibles : rangées de quatre onglets, gris et noir en alternance, l'onglet actif en bleu
         tabs.chunked(4).forEachIndexed { r, row ->
@@ -573,7 +595,8 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
         val (c1, c2) = FamilyTiles[page?.name] ?: (TileGreen to TileLavender)
         KeyboardGrid(cells, c1, c2, dimmed = paid, images = catalog?.images.orEmpty().mapNotNull { i -> i.file?.let { i.id to it } }.toMap()) { cell ->
             if (!paid) when (cell) {
-                is KeyboardCell.ProductCell -> vm.add(cell.product)
+                is KeyboardCell.ProductCell ->
+                    if (catalog?.groupsFor(cell.product.id).isNullOrEmpty()) vm.add(cell.product) else asking = cell.product
                 is KeyboardCell.PageLink -> vm.openPage(cell.page.id)
             }
         }

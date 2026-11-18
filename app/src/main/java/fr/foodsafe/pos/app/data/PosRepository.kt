@@ -98,6 +98,7 @@ class PosRepository(
         dao.insertKey(FiscalKeyEntity(keys.signer.keyId, B64.encode(keys.publicKey.encoded), clock()))
         seedDemoEmployees()
         catalog.seedIfEmpty()
+        catalog.seedModifiersIfEmpty()
     }
 
     val tickets get() = dao.observeTickets()
@@ -176,21 +177,49 @@ class PosRepository(
             OrderSnapshot(order, emptyList())
         }
 
-    fun addProduct(orderId: String, actorId: String, product: Product, level: ServiceLevel?, key: String) =
+    /** Ajoute un produit et, le cas échéant, ses commentaires et suppléments choisis (sous-lignes). */
+    fun addProduct(orderId: String, actorId: String, product: Product, level: ServiceLevel?, key: String, modifiers: List<ModifierItem> = emptyList()) =
         mutate(orderId, actorId, key, "ORDER_LINE_ADDED") { order ->
             val line = OrderLine(
                 id = ids.next(), productId = product.id, label = product.label, unitPriceTtc = product.price,
                 quantityMilli = 1000, vatRate = product.vat, level = level ?: product.defaultLevel,
                 destination = product.destination, authorEmployeeId = actorId, createdAt = clock(),
             )
-            DispatchResult(order.copy(lines = order.lines + line).bumped(), emptyList())
+            DispatchResult(order.copy(lines = order.lines + line + modifiers.map { modifierLine(line, it, actorId) }).bumped(), emptyList())
         }
 
+    /** Commentaires ou suppléments ajoutés après coup à une ligne pas encore envoyée. */
+    fun addModifiers(orderId: String, actorId: String, parentLineId: String, modifiers: List<ModifierItem>, key: String) =
+        mutate(orderId, actorId, key, "ORDER_LINE_ADDED") { order ->
+            val parent = order.lines.firstOrNull { it.id == parentLineId && it.isActive } ?: error("ligne introuvable")
+            require(!parent.isModifier) { "choisissez la ligne du produit" }
+            check(!parent.isSent) { "ligne déjà envoyée en cuisine : ajoutez plutôt un nouvel article" }
+            val at = order.lines.indexOfLast { it.id == parentLineId || it.parentLineId == parentLineId } + 1
+            val lines = order.lines.toMutableList().apply { addAll(at, modifiers.map { modifierLine(parent, it, actorId) }) }
+            DispatchResult(order.copy(lines = lines).bumped(), emptyList())
+        }
+
+    private fun modifierLine(parent: OrderLine, m: ModifierItem, actorId: String) = OrderLine(
+        id = ids.next(), productId = m.id, label = m.label, unitPriceTtc = m.price, quantityMilli = parent.quantityMilli,
+        vatRate = m.vat ?: parent.vatRate, level = parent.level, destination = parent.destination,
+        authorEmployeeId = actorId, createdAt = clock(), parentLineId = parent.id,
+    )
+
+    /** Un produit dont un groupe obligatoire (ex. Cuisson) n'a pas de choix ne part pas en cuisine. */
+    private fun checkMandatory(order: Order) {
+        val missing = order.activeLines.filter { !it.isSent && !it.isModifier }.flatMap { line ->
+            val chosen = order.activeLines.filter { it.parentLineId == line.id }.map { it.productId }
+            catalog.missingMandatory(line.productId, chosen).map { "$it (${line.label})" }
+        }
+        check(missing.isEmpty()) { "Choix obligatoire manquant : " + missing.joinToString(", ") }
+    }
+
     fun sendToKitchen(orderId: String, actorId: String, key: String) =
-        mutate(orderId, actorId, key, "KITCHEN_SENT") { KitchenDispatcher.send(it, ids) }
+        mutate(orderId, actorId, key, "KITCHEN_SENT") { checkMandatory(it); KitchenDispatcher.send(it, ids) }
 
     fun claimNext(orderId: String, actorId: String, key: String) =
         mutate(orderId, actorId, key, "LEVEL_CLAIMED") { order ->
+            checkMandatory(order)
             val level = KitchenDispatcher.nextClaimableLevel(order) ?: error("rien à réclamer")
             KitchenDispatcher.claim(order, level, ids)
         }

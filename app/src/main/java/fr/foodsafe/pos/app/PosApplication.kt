@@ -22,6 +22,8 @@ open class PosApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashReport.install(this)
+        runCatching { packageManager.getPackageInfo(packageName, 0).versionName?.removeSuffix("-debug") }.getOrNull()
+            ?.let { fr.foodsafe.pos.core.fiscal.ReceiptRenderer.SOFTWARE = "FOODSAFE+ POS $it" }
     }
 
     /** Imprimante de tickets intégrée (ESC/POS en USB). */

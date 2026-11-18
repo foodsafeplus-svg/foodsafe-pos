@@ -13,7 +13,8 @@ import java.time.format.DateTimeFormatter
  * Liste des mentions à faire valider par l'expert-comptable / l'organisme certificateur.
  */
 object ReceiptRenderer {
-    const val SOFTWARE = "FOODSAFE+ POS 0.2.0"
+    /** Nom et version du logiciel imprimés en pied de document ; la version est fixée au démarrage de l'application. */
+    @Volatile var SOFTWARE = "FOODSAFE+ POS"
 
     fun render(
         doc: FiscalDocument, est: Establishment, columns: Int = 48,

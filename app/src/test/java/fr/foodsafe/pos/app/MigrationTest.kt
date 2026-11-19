@@ -49,4 +49,17 @@ class MigrationTest {
         db.query("SELECT label, parentLineId FROM order_lines").use { it.moveToFirst(); assertEquals("Pizza Reine", it.getString(0)); assert(it.isNull(1)) }
         db.query("SELECT COUNT(*) FROM modifier_groups").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
     }
+
+    @Test fun migration4vers5AjouteLesFormules() {
+        helper.createDatabase("migr5.db", 4).apply {
+            execSQL("INSERT INTO order_lines (id, orderId, position, productId, label, unitPriceTtc, quantityMilli, vatRateBp, serviceLevel, destination, authorEmployeeId, createdAt, parentLineId) " +
+                "VALUES ('l2','o1',1,'grp-pizza-1','Œuf',100,1000,1000,2,'CUISINE','marie',1,'l1')")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate("migr5.db", 5, true)
+        db.query("SELECT role, promoGroup, parentLineId FROM order_lines").use {
+            it.moveToFirst(); assert(it.isNull(0) && it.isNull(1)); assertEquals("l1", it.getString(2))
+        }
+        db.query("SELECT COUNT(*) FROM formulas").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+    }
 }

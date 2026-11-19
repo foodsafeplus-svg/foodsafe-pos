@@ -29,6 +29,9 @@ import fr.foodsafe.pos.core.kitchen.KitchenTicketRenderer
 import fr.foodsafe.pos.core.money.Cents
 import fr.foodsafe.pos.core.order.Order
 import fr.foodsafe.pos.core.order.OrderLine
+import fr.foodsafe.pos.core.order.FormulaComposer
+import fr.foodsafe.pos.core.order.FormulaPick
+import fr.foodsafe.pos.core.order.PromoEngine
 import fr.foodsafe.pos.core.order.OrderPricer
 import fr.foodsafe.pos.core.order.OrderStatus
 import fr.foodsafe.pos.core.order.SaleMode
@@ -99,6 +102,7 @@ class PosRepository(
         seedDemoEmployees()
         catalog.seedIfEmpty()
         catalog.seedModifiersIfEmpty()
+        catalog.seedFormulasIfEmpty()
     }
 
     val tickets get() = dao.observeTickets()
@@ -185,8 +189,38 @@ class PosRepository(
                 quantityMilli = 1000, vatRate = product.vat, level = level ?: product.defaultLevel,
                 destination = product.destination, authorEmployeeId = actorId, createdAt = clock(),
             )
-            DispatchResult(order.copy(lines = order.lines + line + modifiers.map { modifierLine(line, it, actorId) }).bumped(), emptyList())
+            DispatchResult(withPromos(order.copy(lines = order.lines + line + modifiers.map { modifierLine(line, it, actorId) }).bumped()), emptyList())
         }
+
+    /**
+     * Formule (menu ou package) : [picks] = un produit par étape, dans l'ordre des étapes.
+     * Le niveau d'envoi de chaque article est celui de son étape, sinon celui du produit.
+     */
+    fun addFormula(orderId: String, actorId: String, formula: Formula, picks: List<Product>, key: String) =
+        mutate(orderId, actorId, key, "ORDER_LINE_ADDED") { order ->
+            require(formula.kind != FormulaKind.PROMO) { "une promo s'applique seule" }
+            require(picks.size == formula.steps.size) { "un choix par étape" }
+            formula.steps.zip(picks).forEach { (s, p) -> require(p.id in s.productIds) { "${p.label} n'est pas proposé à l'étape ${s.name}" } }
+            val lines = FormulaComposer.lines(
+                formula.id, formula.name, formula.price,
+                formula.steps.zip(picks).map { (s, p) -> FormulaPick(p.id, p.label, p.formulaPrice ?: p.price, p.vat, s.level ?: p.defaultLevel, p.destination) },
+                ids, actorId, clock(),
+            )
+            DispatchResult(order.copy(lines = order.lines + lines).bumped(), emptyList())
+        }
+
+    /** Promotions automatiques recalculées après chaque ajout ou annulation. */
+    private fun withPromos(order: Order): Order = PromoEngine.apply(order, catalog.promoRules(), ids)
+
+    /** Retrait d'une promotion par l'équipe : droit vérifié (responsable par défaut), motif au journal ; elle n'est plus reproposée sur ces articles. */
+    fun removePromo(orderId: String, actorId: String, lineId: String, reason: String, key: String, approverId: String? = null): OrderSnapshot {
+        require(reason.isNotBlank()) { "motif obligatoire" }
+        val approval = authorize(actorId, SensitiveAction.REMOVE_PROMO, 0, approverId)
+        return mutate(orderId, actorId, key, "PROMO_REMOVED", listOfNotNull(reason.trim(), approval).joinToString(" · ")) { order ->
+            val group = order.lines.firstOrNull { it.id == lineId }?.promoGroup?.takeIf { it != PromoEngine.REFUSED } ?: error("pas de promotion sur cette ligne")
+            DispatchResult(PromoEngine.remove(order, group, refuse = true), emptyList())
+        }
+    }
 
     /** Commentaires ou suppléments ajoutés après coup à une ligne pas encore envoyée. */
     fun addModifiers(orderId: String, actorId: String, parentLineId: String, modifiers: List<ModifierItem>, key: String) =
@@ -237,7 +271,10 @@ class PosRepository(
         val approval = if (sent) authorize(actorId, SensitiveAction.CANCEL_SENT_LINE, 0, approverId) else null
         return mutate(orderId, actorId, key, "LINE_CANCELLED", listOfNotNull(reason, approval).joinToString(" · ")) { order ->
             val line = order.lines.first { it.id == lineId }
-            KitchenDispatcher.cancelLine(order, lineId, line.quantityMilli, reason, actorId, clock(), ids)
+            val r = KitchenDispatcher.cancelLine(order, lineId, line.quantityMilli, reason, actorId, clock(), ids)
+            // l'article annulé libère sa promo : les autres articles reviennent au détail, puis on recherche une combinaison
+            val group = line.promoGroup?.takeIf { it != PromoEngine.REFUSED }
+            if (group == null) r else r.copy(order = withPromos(PromoEngine.remove(r.order, group, refuse = false)))
         }
     }
 

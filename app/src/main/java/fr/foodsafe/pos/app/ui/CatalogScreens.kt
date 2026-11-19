@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -88,7 +89,7 @@ internal fun CatalogHubScreen(vm: PosViewModel) {
         T("Images", "▣", Color(0xFF3F8FE0), Screen.IMAGES),
         T("Claviers", "#", Color(0xFF7A2E2E), Screen.KEYBOARDS),
         T("Commentaires et suppléments", "✎", Color(0xFF2F55C8), Screen.MODIFIERS),
-        T("Formules", "F", Color(0xFF43A047), null),
+        T("Formules", "F", Color(0xFF43A047), Screen.FORMULAS),
         T("Tous les produits", "≡", Color(0xFF5B3CC4), Screen.PRODUCTS),
     )
     Column(Modifier.fillMaxSize().background(TicketBg).padding(16.dp)) {
@@ -145,7 +146,11 @@ internal fun KeyboardsScreen(vm: PosViewModel) {
                     askName = "Clavier ${keyboards.size + 1}" to { n, _ -> vm.addKeyboard(n) }
                 }
             }
-            LazyColumn(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Color.White)) {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            // la page choisie (ou tout juste créée) reste visible dans la liste
+            val selIndex = kb.pages.indexOfFirst { it.id == page?.id }
+            androidx.compose.runtime.LaunchedEffect(selIndex) { if (selIndex >= 0) listState.animateScrollToItem(selIndex) }
+            LazyColumn(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Color.White), state = listState) {
                 items(kb.pages, key = { it.id }) { p ->
                     val sel = p.id == page?.id
                     Row(
@@ -167,7 +172,7 @@ internal fun KeyboardsScreen(vm: PosViewModel) {
                 PadKey("▲", Modifier.weight(1f).height(48.dp), color = NavySoft, textColor = Color.White, enabled = page != null && kb.pages.first().id != page.id) { page?.let { vm.movePage(it.id, -1) } }
                 PadKey("▼", Modifier.weight(1f).height(48.dp), color = NavySoft, textColor = Color.White, enabled = page != null && kb.pages.last().id != page.id) { page?.let { vm.movePage(it.id, +1) } }
                 PadKey("+ Nouvelle page", Modifier.weight(2f).height(48.dp), color = PayCash, textColor = Color.White, fontSize = 15.sp) {
-                    askName = "" to { n, visible -> vm.addPage(kb.id, n, visible) }
+                    askName = "" to { n, visible -> vm.addPage(kb.id, n, visible) { pageId = it } }
                 }
                 PadKey("Suppr.", Modifier.weight(1f).height(48.dp), color = Color(0xFF8E2A2A), textColor = Color.White, fontSize = 14.sp, enabled = page != null && kb.pages.size > 1) {
                     page?.let { vm.deletePage(it.id); pageId = null }
@@ -194,6 +199,8 @@ internal fun KeyboardsScreen(vm: PosViewModel) {
             pages = kb.pages.filter { it.id != page.id }.sortedBy { it.visible }.map { it.id to (it.name + if (!it.visible) " (cachée)" else "") },
             onProduct = { id, color -> vm.setProductCell(page.id, slot, id, color); editCell = null },
             onPage = { id, color -> vm.setPageLinkCell(page.id, slot, id, color); editCell = null },
+            formulas = catalog!!.formulas.filter { it.kind != fr.foodsafe.pos.app.data.FormulaKind.PROMO },
+            onFormula = { id, color -> vm.setFormulaCell(page.id, slot, id, color); editCell = null },
             onClear = { vm.clearCell(page.id, slot); editCell = null },
             onDismiss = { editCell = null },
         )
@@ -229,8 +236,10 @@ private fun NameDialog(initial: String, askVisible: Boolean, onOk: (String, Bool
 private fun CellDialog(
     existing: KeyboardCell?, products: List<Product>, pages: List<Pair<String, String>>,
     onProduct: (String, Int?) -> Unit, onPage: (String, Int?) -> Unit, onClear: () -> Unit, onDismiss: () -> Unit,
+    formulas: List<fr.foodsafe.pos.app.data.Formula> = emptyList(), onFormula: (String, Int?) -> Unit = { _, _ -> },
 ) {
-    var linkMode by remember { mutableStateOf(existing is KeyboardCell.PageLink) }
+    // 0 = produit, 1 = aller à une page, 2 = formule
+    var mode by remember { mutableStateOf(when (existing) { is KeyboardCell.PageLink -> 1; is KeyboardCell.FormulaCell -> 2; else -> 0 }) }
     var color by remember { mutableStateOf(existing?.color) }
     val categories = products.map { it.category }.distinct()
     var category by remember { mutableStateOf((existing as? KeyboardCell.ProductCell)?.product?.category ?: categories.firstOrNull()) }
@@ -240,8 +249,9 @@ private fun CellDialog(
         text = {
             Column(Modifier.width(560.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("Produit", !linkMode) { linkMode = false }
-                    Chip("Aller à une page", linkMode) { linkMode = true }
+                    Chip("Produit", mode == 0) { mode = 0 }
+                    Chip("Aller à une page", mode == 1) { mode = 1 }
+                    Chip("Formule", mode == 2) { mode = 2 }
                 }
                 Text("Couleur", fontSize = 13.sp, color = Muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -252,7 +262,18 @@ private fun CellDialog(
                         Box(Modifier.size(32.dp).clip(CircleShape).background(c).border(2.dp, if (color == c.toArgb()) FsBlue else Color.Transparent, CircleShape).clickable { color = c.toArgb() })
                     }
                 }
-                if (!linkMode) {
+                if (mode == 2) {
+                    if (formulas.isEmpty()) Text("Créez d'abord une formule (menu Produits et claviers → Formules).", color = Muted)
+                    LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                        items(formulas) { f ->
+                            Row(Modifier.fillMaxWidth().clickable { onFormula(f.id, color) }.padding(vertical = 10.dp, horizontal = 6.dp)) {
+                                Text(f.name, Modifier.weight(1f), fontSize = 16.sp, color = Navy)
+                                Text(f.price.format(), fontSize = 16.sp, color = Navy, fontWeight = FontWeight.SemiBold)
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                } else if (mode == 0) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         categories.forEach { c -> Chip(c, c == category) { category = c } }
                     }
@@ -321,6 +342,27 @@ internal fun ProductsScreen(vm: PosViewModel) {
     }
 }
 
+private fun Cents.edit() = format(false).replace(" ", "")
+private fun Cents?.editOrEmpty() = this?.takeIf { !it.isZero }?.edit() ?: ""
+
+/** Champ montant avec boutons −0,10 / +0,10 (comme sur la fiche produit de comptoir). */
+@Composable
+private fun AmountField(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, steps: Boolean = false) {
+    val cents = if (value.isBlank()) Cents.ZERO else parsePrice(value)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(value, { v -> onChange(v.filter { it.isDigit() || it == ',' || it == '.' }.take(8)) }, Modifier.weight(1f),
+            label = { Text(label) }, singleLine = true, isError = cents == null)
+        if (steps) {
+            PadKey("−0,1", Modifier.size(58.dp, 48.dp), fontSize = 14.sp) { cents?.let { onChange(Cents(maxOf(0, it.value - 10)).edit()) } }
+            PadKey("+0,1", Modifier.size(58.dp, 48.dp), fontSize = 14.sp) { onChange(Cents((cents?.value ?: 0) + 10).edit()) }
+        }
+    }
+}
+
+/**
+ * Fiche produit en onglets. Général : identité, prix (normal, tarifs 1 et 2, prix en formule), éco-participations,
+ * prix libre, TVA, type de bien, hors CA. Avancé : envoi en préparation, commentaires, activation. Apparence : image.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ProductDialog(
@@ -330,71 +372,133 @@ internal fun ProductDialog(
     initialGroups: List<String> = emptyList(),
     onSaveGroups: (List<String>) -> Unit = {},
 ) {
+    var tab by remember { mutableStateOf(0) }
     var groupIds by remember { mutableStateOf(initialGroups) }
     var imageId by remember { mutableStateOf(initial.imageId) }
     var label by remember { mutableStateOf(initial.label) }
-    var price by remember { mutableStateOf(if (isNew) "" else initial.price.format(false).replace(" ", "")) }
+    var code by remember { mutableStateOf(initial.internalCode ?: "") }
+    var description by remember { mutableStateOf(initial.description ?: "") }
+    var price by remember { mutableStateOf(if (isNew) "" else initial.price.edit()) }
+    var price1 by remember { mutableStateOf(initial.price1.editOrEmpty()) }
+    var price2 by remember { mutableStateOf(initial.price2.editOrEmpty()) }
+    var formulaPrice by remember { mutableStateOf(initial.formulaPrice.editOrEmpty()) }
+    var deee by remember { mutableStateOf(initial.ecoDeee.editOrEmpty()) }
+    var dea by remember { mutableStateOf(initial.ecoDea.editOrEmpty()) }
+    var openPrice by remember { mutableStateOf(initial.openPrice) }
     var vat by remember { mutableStateOf(initial.vat) }
+    var goods by remember { mutableStateOf(initial.goodsType) }
+    var outOfTurnover by remember { mutableStateOf(initial.outOfTurnover) }
     var category by remember { mutableStateOf(initial.category) }
     var sub by remember { mutableStateOf(initial.subCategory ?: "") }
     var level by remember { mutableStateOf(initial.defaultLevel) }
     var dest by remember { mutableStateOf(initial.destination) }
     var active by remember { mutableStateOf(initial.active) }
-    val cents = parsePrice(price)
+    fun opt(v: String) = if (v.isBlank()) null else parsePrice(v)
+    val cents = if (openPrice && price.isBlank()) Cents.ZERO else parsePrice(price)
+    val amounts = listOf(price1, price2, formulaPrice, deee, dea)
+    val amountsOk = amounts.all { it.isBlank() || parsePrice(it) != null }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "Nouveau produit" else "Modifier le produit") },
+        title = { Text(if (isNew) "Nouveau produit" else "Produit ${initial.label.uppercase()}") },
         text = {
-            Column(Modifier.width(560.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(label, { label = it.take(40) }, Modifier.weight(2f), label = { Text("Nom") }, singleLine = true)
-                    OutlinedTextField(price, { v -> price = v.filter { it.isDigit() || it == ',' || it == '.' }.take(8) }, Modifier.weight(1f),
-                        label = { Text("Prix TTC (€)") }, singleLine = true, isError = price.isNotEmpty() && cents == null)
-                }
-                Text("TVA", fontSize = 13.sp, color = Muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { VatChoices.forEach { r -> Chip(r.format(), r == vat) { vat = r } } }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(category, { category = it.take(30) }, Modifier.weight(1f), label = { Text("Catégorie") }, singleLine = true)
-                    OutlinedTextField(sub, { sub = it.take(30) }, Modifier.weight(1f), label = { Text("Sous-catégorie (facultatif)") }, singleLine = true)
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    categories.forEach { c -> Chip(c, c == category) { category = c } }
-                }
-                Text("Envoi en préparation", fontSize = 13.sp, color = Muted)
+            Column(Modifier.width(860.dp).heightIn(max = 600.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("CUISINE", "BAR").forEach { d -> Chip(d.lowercase().replaceFirstChar { it.uppercase() }, d == dest) { dest = d } }
-                    Spacer(Modifier.width(12.dp))
-                    (0..3).map(::ServiceLevel).forEach { l -> Chip(l.label, l == level) { level = l } }
+                    listOf("Général", "Avancé", "Apparence").forEachIndexed { i, t -> Chip(t, tab == i) { tab = i } }
                 }
-                if (images.isNotEmpty()) {
-                    Text("Image du bouton", fontSize = 13.sp, color = Muted)
-                    ImagePicker(images, imageId) { imageId = it }
-                }
-                if (groups.isNotEmpty()) {
-                    Text("Commentaires et suppléments proposés à la vente", fontSize = 13.sp, color = Muted)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        groups.forEach { g -> Chip(g.name + if (g.mandatory) " *" else "", g.id in groupIds) { groupIds = if (g.id in groupIds) groupIds - g.id else groupIds + g.id } }
+                HorizontalDivider()
+                Column(Modifier.weight(1f, fill = false).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    when (tab) {
+                        0 -> {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(category, { category = it.take(30) }, Modifier.weight(1f), label = { Text("Catégorie") }, singleLine = true)
+                                OutlinedTextField(sub, { sub = it.take(30) }, Modifier.weight(1f), label = { Text("Sous-catégorie (facultatif)") }, singleLine = true)
+                            }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                categories.forEach { c -> Chip(c, c == category) { category = c } }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(label, { label = it.take(40) }, Modifier.weight(1f), label = { Text("Nom") }, singleLine = true)
+                                OutlinedTextField(code, { code = it.take(20) }, Modifier.weight(1f), label = { Text("Code interne") }, singleLine = true)
+                            }
+                            OutlinedTextField(description, { description = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Description / information") })
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AmountField("Prix de vente TTC normal (€)", price, { price = it }, Modifier.weight(1.6f), steps = true)
+                                AmountField("Prix 1", price1, { price1 = it }, Modifier.weight(0.7f))
+                                AmountField("Prix 2", price2, { price2 = it }, Modifier.weight(0.7f))
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AmountField("Prix formule ou composition", formulaPrice, { formulaPrice = it }, Modifier.weight(1.6f), steps = true)
+                                AmountField("Dont éco-part DEEE", deee, { deee = it }, Modifier.weight(0.7f))
+                                AmountField("Dont éco-part DEA", dea, { dea = it }, Modifier.weight(0.7f))
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Prix libre", Modifier.width(110.dp), color = Navy, fontWeight = FontWeight.SemiBold)
+                                Chip("Oui", openPrice) { openPrice = true }
+                                Chip("Non", !openPrice) { openPrice = false }
+                                if (openPrice) Text("Le prix est demandé au pavé à chaque vente.", fontSize = 12.sp, color = Muted)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("TVA", Modifier.width(110.dp), color = Navy, fontWeight = FontWeight.SemiBold)
+                                (listOf(fr.foodsafe.pos.core.money.BasisPoints(0)) + VatChoices).forEach { r -> Chip(r.format(), r == vat) { vat = r } }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Type de bien", Modifier.width(110.dp), color = Navy, fontWeight = FontWeight.SemiBold)
+                                fr.foodsafe.pos.app.data.GoodsType.entries.forEach { g -> Chip(g.label, g == goods) { goods = g } }
+                                Spacer(Modifier.width(16.dp))
+                                Text("Hors CA", color = Navy, fontWeight = FontWeight.SemiBold)
+                                androidx.compose.material3.Switch(outOfTurnover, { outOfTurnover = it })
+                            }
+                            if (outOfTurnover) Text("Hors CA est enregistré sur la fiche ; son effet sur les totaux et la clôture n'est pas encore appliqué.", fontSize = 12.sp, color = Warn)
+                            if (!isNew && cents != null && (cents != initial.price || vat != initial.vat)) {
+                                Text("Le nouveau prix ou la nouvelle TVA vaudront pour les ventes suivantes. Les tickets déjà émis ne changent pas.", fontSize = 12.sp, color = Warn)
+                            }
+                        }
+                        1 -> {
+                            Text("Envoi en préparation", fontSize = 13.sp, color = Muted)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("CUISINE", "BAR").forEach { d -> Chip(d.lowercase().replaceFirstChar { it.uppercase() }, d == dest) { dest = d } }
+                                Spacer(Modifier.width(12.dp))
+                                (0..3).map(::ServiceLevel).forEach { l -> Chip(l.label, l == level) { level = l } }
+                            }
+                            if (groups.isNotEmpty()) {
+                                Text("Commentaires et suppléments proposés à la vente", fontSize = 13.sp, color = Muted)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    groups.forEach { g -> Chip(g.name + if (g.mandatory) " *" else "", g.id in groupIds) { groupIds = if (g.id in groupIds) groupIds - g.id else groupIds + g.id } }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Chip("Actif", active) { active = true }
+                                Chip("Inactif (retiré de la vente)", !active) { active = false }
+                            }
+                        }
+                        else -> {
+                            Text("Image du bouton", fontSize = 13.sp, color = Muted)
+                            if (images.isEmpty()) Text("Aucune image importée (menu Produits et claviers → Images).", color = Muted)
+                            else ImagePicker(images, imageId) { imageId = it }
+                        }
                     }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Chip("Actif", active) { active = true }
-                    Chip("Inactif (retiré de la vente)", !active) { active = false }
-                }
-                if (!isNew && cents != null && (cents != initial.price || vat != initial.vat)) {
-                    Text("Le nouveau prix ou la nouvelle TVA vaudront pour les ventes suivantes. Les tickets déjà émis ne changent pas.", fontSize = 12.sp, color = Warn)
                 }
             }
         },
         confirmButton = {
             Button(
-                onClick = { if (groupIds != initialGroups) onSaveGroups(groupIds); onSave(initial.copy(label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null }, defaultLevel = level, destination = dest, active = active, imageId = imageId)) },
-                enabled = label.isNotBlank() && cents != null,
+                onClick = {
+                    if (groupIds != initialGroups) onSaveGroups(groupIds)
+                    onSave(initial.copy(
+                        label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null },
+                        defaultLevel = level, destination = dest, active = active, imageId = imageId,
+                        internalCode = code.trim().ifBlank { null }, description = description.trim().ifBlank { null },
+                        price1 = opt(price1), price2 = opt(price2), formulaPrice = opt(formulaPrice),
+                        ecoDeee = opt(deee) ?: Cents.ZERO, ecoDea = opt(dea) ?: Cents.ZERO,
+                        openPrice = openPrice, goodsType = goods, outOfTurnover = outOfTurnover,
+                    ))
+                },
+                enabled = label.isNotBlank() && cents != null && amountsOk,
             ) { Text("Enregistrer") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
 }
-
 
 internal fun fr.foodsafe.pos.app.data.CatalogState.imageFiles(): Map<String, java.io.File> =
     images.mapNotNull { i -> i.file?.let { i.id to it } }.toMap()

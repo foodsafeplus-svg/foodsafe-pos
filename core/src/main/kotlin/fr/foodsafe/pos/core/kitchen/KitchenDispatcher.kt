@@ -31,7 +31,8 @@ object KitchenDispatcher {
         if (unsent.isEmpty()) return DispatchResult(order, emptyList())
         val dispatchId = ids.next()
         val tickets = mutableListOf<KitchenTicket>()
-        unsent.groupBy { it.destination }.toSortedMap().forEach { (destination, lines) ->
+        // l'en-tête d'une formule ne part pas en cuisine : ses composants y vont, chacun à son niveau
+        unsent.filter { !it.isFormulaHeader }.groupBy { it.destination }.toSortedMap().forEach { (destination, lines) ->
             val (additions, regular) = lines.partition { !it.level.isDirect && it.level.value in order.claimedLevels }
             if (regular.isNotEmpty()) {
                 tickets += KitchenTicket(
@@ -63,6 +64,7 @@ object KitchenDispatcher {
     /** Niveau que le bouton dynamique "Réclamer Nx" doit proposer, ou null s'il n'y a plus rien à réclamer. */
     fun nextClaimableLevel(order: Order): ServiceLevel? =
         order.activeLines.asSequence()
+            .filter { !it.isFormulaHeader }
             .map { it.level.value }
             .filter { it > 0 && it !in order.claimedLevels }
             .minOrNull()
@@ -80,7 +82,7 @@ object KitchenDispatcher {
         val sent = send(order, ids)
         val claimId = ids.next()
         val claimTickets = sent.order.activeLines
-            .filter { it.level == level }
+            .filter { it.level == level && !it.isFormulaHeader }
             .groupBy { it.destination }
             .toSortedMap()
             .map { (destination, lines) ->
@@ -117,8 +119,10 @@ object KitchenDispatcher {
         val line = order.lines.firstOrNull { it.id == lineId } ?: throw NoSuchElementException("ligne $lineId")
         if (!line.isActive) throw KitchenRuleViolation("ligne déjà annulée")
         require(quantityMilli in 1..line.quantityMilli) { "quantité à annuler invalide" }
-        // Les commentaires et suppléments d'une ligne sont annulés avec elle.
-        val children = order.lines.filter { it.parentLineId == lineId && it.isActive }
+        if (line.isComponent) throw KitchenRuleViolation("article de formule : annulez la formule entière")
+        // Les sous-lignes (commentaires, suppléments, composants de formule et leurs commentaires) sont annulées avec elle.
+        val children = generateSequence(listOf(line)) { level -> order.lines.filter { c -> c.isActive && level.any { it.id == c.parentLineId } }.takeIf { it.isNotEmpty() } }
+            .drop(1).flatten().toList()
         if (children.isNotEmpty() && quantityMilli != line.quantityMilli) throw KitchenRuleViolation("annulez la ligne entière (elle porte des commentaires ou suppléments)")
         val cancelledIds = setOf(lineId) + children.map { it.id }
 
@@ -134,17 +138,19 @@ object KitchenDispatcher {
                 )
             }
         }
-        val tickets = if (line.isSent) listOf(
+        // Un bon d'annulation par destination ayant reçu des articles (une formule peut toucher cuisine et bar).
+        val sentItems = (listOf(line.copy(quantityMilli = quantityMilli)) + children).filter { it.isSent && !it.isFormulaHeader }
+        val ticketId = if (sentItems.isEmpty()) null else ids.next()
+        val tickets = sentItems.groupBy { it.destination }.toSortedMap().map { (destination, items) ->
             KitchenTicket(
-                dispatchId = ids.next(),
-                destination = line.destination,
+                dispatchId = ticketId!!,
+                destination = destination,
                 kind = KitchenTicketKind.CANCELLATION,
                 tableLabel = tableLabel(order),
-                items = listOf(KitchenItem(quantityMilli, line.label, line.level, modifier = line.isModifier)) +
-                    children.filter { it.isSent }.map { it.toItem() },
+                items = items.map { it.toItem() },
                 inverse = true,
-            ),
-        ) else emptyList()
+            )
+        }
         return DispatchResult(order.copy(lines = newLines).bumped(), tickets)
     }
 

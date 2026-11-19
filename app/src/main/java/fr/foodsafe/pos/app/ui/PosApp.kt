@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,6 +72,7 @@ import fr.foodsafe.pos.app.data.KitchenTicketEntity
 import fr.foodsafe.pos.app.data.OrderSnapshot
 import fr.foodsafe.pos.app.data.PosRepository
 import fr.foodsafe.pos.app.data.Product
+import fr.foodsafe.pos.core.order.PromoEngine
 import fr.foodsafe.pos.core.fiscal.FiscalDocType
 import fr.foodsafe.pos.core.fiscal.FiscalVerification
 import fr.foodsafe.pos.core.journal.ChainVerification
@@ -284,6 +286,7 @@ private fun MainScreen(state: UiState, vm: PosViewModel) {
                 Screen.IMAGES -> ImagesScreen(vm)
                 Screen.WIZARD -> ProductWizardScreen(vm)
                 Screen.MODIFIERS -> ModifiersScreen(vm)
+                Screen.FORMULAS -> FormulasScreen(vm)
             }
         }
     }
@@ -340,6 +343,7 @@ private fun OrderScreen(s: OrderSnapshot, selectedLevel: ServiceLevel?, vm: PosV
     var paying by remember(s.order.id) { mutableStateOf(false) }
     var selectedLineId by remember(s.order.id) { mutableStateOf<String?>(null) }
     var commentLine by remember { mutableStateOf<OrderLine?>(null) }
+    var promoLine by remember { mutableStateOf<OrderLine?>(null) }
     val catalog by vm.catalog.collectAsStateWithLifecycle()
     val paid = s.order.status == OrderStatus.PAID
     // Ligne visée par « Supprimer ligne » : celle touchée, sinon la dernière ligne active.
@@ -362,8 +366,12 @@ private fun OrderScreen(s: OrderSnapshot, selectedLevel: ServiceLevel?, vm: PosV
         } else {
             // « Commentaire » : sur la ligne produit visée (ou la ligne parente d'un commentaire), tant qu'elle n'est pas envoyée
             val commentTarget = targetLine?.let { t -> if (t.isModifier) s.order.lines.firstOrNull { it.id == t.parentLineId } else t }?.takeIf { !it.isSent && it.isActive }
-            ActionColumn(s, Modifier.width(118.dp), onCancelLine = { targetLine?.let { cancelTarget = it } }, onDiscount = { showDiscount = true },
-                onComment = commentTarget?.let { t -> { commentLine = t } }, vm = vm)
+            ActionColumn(s, Modifier.width(118.dp), onCancelLine = {
+                // un article de formule s'annule avec sa formule
+                targetLine?.let { t -> cancelTarget = if (t.isComponent) s.order.lines.firstOrNull { it.id == t.parentLineId } ?: t else t }
+            }, onDiscount = { showDiscount = true },
+                onComment = commentTarget?.let { t -> { commentLine = t } },
+                onRemovePromo = targetLine?.takeIf { it.promoGroup != null && it.promoGroup != PromoEngine.REFUSED }?.let { t -> { promoLine = t } }, vm = vm)
             ProductPanel(paid, selectedLevel, Modifier.weight(0.60f), vm)
         }
     }
@@ -372,6 +380,9 @@ private fun OrderScreen(s: OrderSnapshot, selectedLevel: ServiceLevel?, vm: PosV
         // groupes du produit, sinon tous les groupes (commentaire libre choisi dans la liste)
         val groups = catalog?.groupsFor(line.productId).orEmpty().ifEmpty { catalog?.groups.orEmpty() }
         ModifierDialog(line.label, groups.map { it.copy(mandatory = false) }, onDismiss = { commentLine = null }) { vm.addModifiers(line.id, it); commentLine = null }
+    }
+    promoLine?.let { line ->
+        PromoRemoveDialog(line, onDismiss = { promoLine = null }) { reason -> vm.removePromo(line.id, reason); promoLine = null }
     }
     if (showDiscount) DiscountDialog(onDismiss = { showDiscount = false }) { vm.ticketDiscount(it); showDiscount = false }
 }
@@ -403,7 +414,7 @@ private fun TicketPanel(s: OrderSnapshot, modifier: Modifier, selectedLineId: St
                     Text(full.format(Date(now)), color = Color.White, fontSize = 13.sp)
                 } else {
                     Text("À PAYER : ${priced.totalTtc.format()}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text("NB ART : ${s.order.activeLines.count { !it.isModifier }} · ${s.order.ownerEmployeeId}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    Text("NB ART : ${s.order.activeLines.count { !it.isModifier && !it.isFormulaHeader }} · ${s.order.ownerEmployeeId}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                 }
             }
         }
@@ -417,6 +428,9 @@ private fun TicketPanel(s: OrderSnapshot, modifier: Modifier, selectedLineId: St
                 }
                 items(lines, key = { it.line.id }) { pl ->
                     val l = pl.line
+                    // en-tête de formule : montant = somme de ses composants (ventilés) ; composants affichés sans prix
+                    val formulaTotal = if (l.isFormulaHeader) Cents(priced.lines.filter { it.line.parentLineId == l.id }.sumOf { it.net.value }) else null
+                    val hidePrice = l.isComponent || (l.isModifier && pl.gross.isZero)
                     Row(
                         Modifier.fillMaxWidth().background(if (l.id == selectedLineId && !paid) Color(0xFFDDE3EC) else Color.White)
                             .clickable(enabled = !paid) { onSelect(l.id) }.padding(horizontal = 6.dp, vertical = 4.dp),
@@ -426,16 +440,18 @@ private fun TicketPanel(s: OrderSnapshot, modifier: Modifier, selectedLineId: St
                             Text(l.authorEmployeeId.uppercase().take(6), fontSize = 8.sp, color = Muted, maxLines = 1)
                             Text(hour.format(Date(l.createdAt)), fontSize = 8.sp, color = Muted)
                         }
-                        if (l.isModifier) {
-                            Text("    > ${l.label}", Modifier.weight(1f).padding(start = 22.dp), fontSize = 13.sp, color = FsBlue, maxLines = 1)
-                            Text(if (pl.gross.isZero) "" else "PU ${l.unitPriceTtc.format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
+                        if (l.isModifier || l.isComponent) {
+                            Text("    > ${l.label}" + if (l.isComponent && !l.level.isDirect) "  (${l.level.label})" else "", Modifier.weight(1f).padding(start = 22.dp),
+                                fontSize = 13.sp, color = if (l.isComponent) Navy else FsBlue, maxLines = 1)
+                            Text(if (hidePrice) "" else "PU ${l.unitPriceTtc.format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
                         } else {
                             Text(KitchenTicketRenderer.formatQty(l.quantityMilli), Modifier.width(22.dp), fontWeight = FontWeight.Bold)
-                            Text(l.label, Modifier.weight(1f), fontSize = 14.sp, maxLines = 1)
-                            Text("PU ${l.unitPriceTtc.format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
+                            Text(l.label, Modifier.weight(1f), fontSize = 14.sp, maxLines = 1, fontWeight = if (l.isFormulaHeader) FontWeight.Bold else FontWeight.Normal)
+                            if (l.promoGroup != null && l.promoGroup != PromoEngine.REFUSED) Text("PROMO ", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E9E4F))
+                            Text("PU ${(formulaTotal ?: l.unitPriceTtc).format(false)}", Modifier.width(62.dp), fontSize = 11.sp, color = Muted)
                         }
-                        if (pl.gross != pl.net) Text(pl.gross.format(false) + " ", textDecoration = TextDecoration.LineThrough, color = Muted, fontSize = 11.sp)
-                        Text(if (l.isModifier && pl.gross.isZero) "" else pl.net.format(false), Modifier.width(50.dp), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
+                        if (pl.gross != pl.net && !hidePrice) Text(pl.gross.format(false) + " ", textDecoration = TextDecoration.LineThrough, color = Muted, fontSize = 11.sp)
+                        Text(if (hidePrice) "" else (formulaTotal ?: pl.net).format(false), Modifier.width(50.dp), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
                         Text(if (l.isSent) "E" else "", Modifier.width(16.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E9E4F), textAlign = TextAlign.End)
                     }
                     HorizontalDivider(color = TicketBg)
@@ -518,7 +534,7 @@ private fun typeAmount(entry: String, k: String): String = when {
 
 /** Colonne noire d'actions sur la note. Seules les actions réellement disponibles y figurent. */
 @Composable
-private fun ActionColumn(s: OrderSnapshot, modifier: Modifier, onCancelLine: () -> Unit, onDiscount: () -> Unit, onComment: (() -> Unit)?, vm: PosViewModel) {
+private fun ActionColumn(s: OrderSnapshot, modifier: Modifier, onCancelLine: () -> Unit, onDiscount: () -> Unit, onComment: (() -> Unit)?, onRemovePromo: (() -> Unit)? = null, vm: PosViewModel) {
     val paid = s.order.status == OrderStatus.PAID
     val hasLines = s.order.activeLines.isNotEmpty()
     val nextClaim = KitchenDispatcher.nextClaimableLevel(s.order)
@@ -527,6 +543,7 @@ private fun ActionColumn(s: OrderSnapshot, modifier: Modifier, onCancelLine: () 
         if (nextClaim != null && !paid) FunctionButton("N", Color(0xFF7B4FD6), "Réclamer ${nextClaim.label}", onClick = vm::claim)
         FunctionButton("−", Accent, "Supprimer ligne", enabled = !paid && hasLines, onClick = onCancelLine)
         FunctionButton("✎", Color(0xFF2F55C8), "Commentaire", enabled = !paid && onComment != null, onClick = { onComment?.invoke() })
+        if (onRemovePromo != null && !paid) FunctionButton("P", Color(0xFF2E9E4F), "Retirer promo", onClick = onRemovePromo)
         FunctionButton("%", Color(0xFF1FB5A8), "Remise note %", enabled = !paid, onClick = onDiscount)
         FunctionButton("≡", Color(0xFFF08A30), "Imprimer la note", enabled = !paid && hasLines, onClick = vm::printNote)
     }
@@ -566,8 +583,39 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
     val tabs = keyboard?.visiblePages.orEmpty()
     val page = keyboard?.pages?.firstOrNull { it.id == pageId } ?: tabs.firstOrNull()
     var asking by remember { mutableStateOf<Product?>(null) }
+    var askingFormula by remember { mutableStateOf<fr.foodsafe.pos.app.data.Formula?>(null) }
+    // appui long : menu de la touche, fiche produit, déplacement (page, case)
+    var menuFor by remember { mutableStateOf<Pair<String, KeyboardCell>?>(null) }
+    var editing by remember { mutableStateOf<Product?>(null) }
+    // prix libre : produit en attente de son prix
+    var pricing by remember { mutableStateOf<Pair<Product, List<fr.foodsafe.pos.app.data.ModifierItem>>?>(null) }
+    pricing?.let { (p, mods) ->
+        PriceDialog("Prix de « ${p.label} »", onDismiss = { pricing = null }) { v ->
+            v.replace(',', '.').toBigDecimalOrNull()?.takeIf { it.signum() > 0 && it.scale() <= 2 }?.movePointRight(2)?.toLong()?.let { c ->
+                vm.add(p.copy(price = Cents(c)), mods); pricing = null
+            } ?: vm.notify("Prix invalide")
+        }
+    }
+    var moving by remember { mutableStateOf<Pair<String, KeyboardCell>?>(null) }
+    menuFor?.let { (pg, cell) ->
+        KeyMenuDialog(cell, onDismiss = { menuFor = null },
+            onEdit = (cell as? KeyboardCell.ProductCell)?.let { pc -> { editing = pc.product; menuFor = null } },
+            onMove = { moving = pg to cell; menuFor = null },
+            onFree = { vm.clearCell(pg, cell.slot); menuFor = null })
+    }
+    editing?.let { p ->
+        ProductDialog(p, catalog?.categories.orEmpty(), isNew = false,
+            onSave = { vm.saveProduct(it); editing = null }, onDismiss = { editing = null }, images = catalog?.images.orEmpty(),
+            groups = catalog?.groups.orEmpty(), initialGroups = catalog?.productGroups?.get(p.id).orEmpty(),
+            onSaveGroups = { vm.setProductGroups(p.id, it) })
+    }
+    askingFormula?.let { f ->
+        FormulaDialog(f, catalog?.products.orEmpty(), onDismiss = { askingFormula = null }) { vm.addFormula(f, it); askingFormula = null }
+    }
     asking?.let { p ->
-        ModifierDialog(p.label, catalog?.groupsFor(p.id).orEmpty(), onDismiss = { asking = null }) { vm.add(p, it); asking = null }
+        ModifierDialog(p.label, catalog?.groupsFor(p.id).orEmpty(), onDismiss = { asking = null }) {
+            if (p.openPrice) pricing = p to it else vm.add(p, it); asking = null
+        }
     }
     Column(modifier.fillMaxHeight().background(Color.White).padding(6.dp)) {
         // Pages visibles : rangées de quatre onglets, gris et noir en alternance, l'onglet actif en bleu
@@ -591,13 +639,40 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
             LevelChip("Niveau produit", selectedLevel == null) { vm.selectLevel(null) }
             (0..3).forEach { l -> ServiceLevel(l).let { lvl -> LevelChip(lvl.label, selectedLevel == lvl) { vm.selectLevel(lvl) } } }
         }
+        moving?.let { (fromPage, cell) ->
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFFFFE9A8)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Déplacement de « ${cell.title()} » : touchez la case d'arrivée (une touche occupée est échangée). Changez d'onglet pour une autre page.",
+                    Modifier.weight(1f), fontSize = 13.sp, color = Navy)
+                PadKey("Annuler", Modifier.size(110.dp, 38.dp), color = NavySoft, textColor = Color.White, fontSize = 14.sp) { moving = null }
+            }
+        }
         val cells = page?.let { keyboard?.cellsOf(it.id) }.orEmpty()
         val (c1, c2) = FamilyTiles[page?.name] ?: (TileGreen to TileLavender)
-        KeyboardGrid(cells, c1, c2, dimmed = paid, images = catalog?.images.orEmpty().mapNotNull { i -> i.file?.let { i.id to it } }.toMap()) { cell ->
-            if (!paid) when (cell) {
-                is KeyboardCell.ProductCell ->
-                    if (catalog?.groupsFor(cell.product.id).isNullOrEmpty()) vm.add(cell.product) else asking = cell.product
+        val mv = moving
+        KeyboardGrid(cells, c1, c2, dimmed = paid, images = catalog?.images.orEmpty().mapNotNull { i -> i.file?.let { i.id to it } }.toMap(),
+            showEmpty = mv != null,
+            onEmpty = { slot -> if (mv != null && page != null) { vm.moveCell(mv.first, mv.second.slot, page.id, slot); moving = null } },
+            onLongCell = { cell ->
+                if (mv == null && page != null) {
+                    if (vm.canEditCatalog) menuFor = page.id to cell else vm.notify("Modifier ou déplacer une touche : réservé au responsable")
+                }
+            },
+            highlightSlot = mv?.takeIf { it.first == page?.id }?.second?.slot,
+        ) { cell ->
+            if (mv != null) {
+                if (page != null) { vm.moveCell(mv.first, mv.second.slot, page.id, cell.slot); moving = null }
+            } else if (!paid) when (cell) {
+                is KeyboardCell.ProductCell -> when {
+                    !catalog?.groupsFor(cell.product.id).isNullOrEmpty() -> asking = cell.product
+                    cell.product.openPrice -> pricing = cell.product to emptyList()
+                    else -> vm.add(cell.product)
+                }
                 is KeyboardCell.PageLink -> vm.openPage(cell.page.id)
+                is KeyboardCell.FormulaCell -> {
+                    val byId = catalog?.products.orEmpty().associateBy { it.id }
+                    if (cell.formula.isFixed) vm.addFormula(cell.formula, cell.formula.steps.mapNotNull { byId[it.productIds.first()] })
+                    else askingFormula = cell.formula
+                }
             }
         }
     }
@@ -608,7 +683,12 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
 internal fun KeyboardGrid(
     cells: Map<Int, KeyboardCell>, c1: Color, c2: Color, dimmed: Boolean = false, showEmpty: Boolean = false,
     images: Map<String, java.io.File> = emptyMap(),
-    onEmpty: (Int) -> Unit = {}, onCell: (KeyboardCell) -> Unit,
+    onEmpty: (Int) -> Unit = {},
+    /** Appui long sur une touche (modifier, déplacer). */
+    onLongCell: ((KeyboardCell) -> Unit)? = null,
+    /** Touche en cours de déplacement, encadrée. */
+    highlightSlot: Int? = null,
+    onCell: (KeyboardCell) -> Unit,
 ) {
     val last = cells.keys.maxOrNull() ?: -1
     val count = maxOf(10, ((last + 1 + 4) / 5) * 5 + if (showEmpty) 5 else 0)
@@ -621,17 +701,28 @@ internal fun KeyboardGrid(
                     contentAlignment = Alignment.Center,
                 ) { if (showEmpty) Text("+", fontSize = 26.sp, color = Muted) }
             } else {
-                val base = cell.color?.let { Color(it) } ?: if (cell is KeyboardCell.PageLink) Color(0xFF3D4A63) else if ((idx / 5) % 2 == 0) c1 else c2
-                val fg = if (cell is KeyboardCell.PageLink && cell.color == null) Color.White else Navy
+                val base = cell.color?.let { Color(it) } ?: when {
+                    cell is KeyboardCell.PageLink -> Color(0xFF3D4A63)
+                    cell is KeyboardCell.FormulaCell -> Color(0xFF2E7D4F)
+                    (idx / 5) % 2 == 0 -> c1
+                    else -> c2
+                }
+                val fg = if (cell !is KeyboardCell.ProductCell && cell.color == null) Color.White else Navy
                 Box(
                     Modifier.height(82.dp).clip(RoundedCornerShape(4.dp)).background(if (dimmed) base.copy(alpha = 0.4f) else base)
-                        .clickable { onCell(cell) }.padding(5.dp),
+                        .then(if (idx == highlightSlot) Modifier.border(3.dp, Color(0xFFD62828), RoundedCornerShape(4.dp)) else Modifier)
+                        .combinedClickable(onClick = { onCell(cell) }, onLongClick = onLongCell?.let { f -> { f(cell) } }).padding(5.dp),
                 ) {
                     when (cell) {
                         is KeyboardCell.ProductCell -> {
                             cell.product.imageId?.let(images::get)?.let { f -> ImageThumb(f, Modifier.align(Alignment.TopCenter).size(40.dp)) }
                             Text(cell.product.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = fg)
                             Text(cell.product.label, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = fg, textAlign = TextAlign.Center, maxLines = 2)
+                        }
+                        is KeyboardCell.FormulaCell -> {
+                            Text(cell.formula.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = fg)
+                            Text("FORMULE", Modifier.align(Alignment.TopStart), fontSize = 9.sp, color = fg, fontWeight = FontWeight.Bold)
+                            Text(cell.formula.name, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = fg, textAlign = TextAlign.Center, maxLines = 2)
                         }
                         is KeyboardCell.PageLink -> {
                             Text("→", Modifier.align(Alignment.TopEnd), fontSize = 16.sp, color = fg, fontWeight = FontWeight.Bold)
@@ -642,6 +733,29 @@ internal fun KeyboardGrid(
             }
         }
     }
+}
+
+internal fun KeyboardCell.title() = when (this) {
+    is KeyboardCell.ProductCell -> product.label
+    is KeyboardCell.PageLink -> page.name
+    is KeyboardCell.FormulaCell -> formula.name
+}
+
+@Composable
+private fun KeyMenuDialog(cell: KeyboardCell, onDismiss: () -> Unit, onEdit: (() -> Unit)?, onMove: () -> Unit, onFree: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(cell.title()) },
+        text = {
+            Column(Modifier.width(360.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (onEdit != null) PadKey("Modifier le produit", Modifier.fillMaxWidth().height(56.dp), color = FsBlue, textColor = Color.White, fontSize = 17.sp, onClick = onEdit)
+                PadKey("Déplacer la touche", Modifier.fillMaxWidth().height(56.dp), color = NavySoft, textColor = Color.White, fontSize = 17.sp, onClick = onMove)
+                PadKey("Libérer l'emplacement", Modifier.fillMaxWidth().height(56.dp), color = Color(0xFF2E9E4F), textColor = Color.White, fontSize = 17.sp, onClick = onFree)
+                Text("Libérer retire la touche de cette page ; le produit reste au catalogue.", fontSize = 12.sp, color = Muted)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
+    )
 }
 
 @Composable
@@ -817,6 +931,18 @@ private fun ApprovalDialog(p: PendingApproval, onPin: (String) -> Unit, onDismis
             }
         },
         confirmButton = { Button(onClick = { onPin(pin) }, enabled = pin.length >= 4) { Text("Valider") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
+}
+
+@Composable
+private fun PriceDialog(title: String, onDismiss: () -> Unit, onOk: (String) -> Unit) {
+    var v by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { OutlinedTextField(v, { s -> v = s.filter { it.isDigit() || it == ',' || it == '.' }.take(8) }, singleLine = true, label = { Text("Prix TTC (€)") }) },
+        confirmButton = { Button(onClick = { onOk(v) }, enabled = v.isNotBlank()) { Text("Valider") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
 }

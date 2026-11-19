@@ -7,6 +7,7 @@ import fr.foodsafe.pos.core.kitchen.KitchenTicketKind
 import fr.foodsafe.pos.core.kitchen.KitchenTicketRenderer
 import fr.foodsafe.pos.core.money.Cents
 import fr.foodsafe.pos.core.order.OrderPricer
+import fr.foodsafe.pos.core.order.LineRole
 import fr.foodsafe.pos.core.tax.FrenchVat
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -17,10 +18,10 @@ import org.junit.jupiter.api.assertThrows
 class ModifierLinesTest {
     private val ids = SeqIds()
     private val pizza = line("l1", "Pizza Reine", 1350, level = 2)
-    private val oeuf = line("l2", "Œuf", 100, level = 2).copy(parentLineId = "l1")
-    private val sansOlives = line("l3", "Sans olives", 0, level = 2).copy(parentLineId = "l1")
+    private val oeuf = line("l2", "Œuf", 100, level = 2).copy(parentLineId = "l1", role = LineRole.MODIFIER)
+    private val sansOlives = line("l3", "Sans olives", 0, level = 2).copy(parentLineId = "l1", role = LineRole.MODIFIER)
     private val whisky = line("l4", "Whisky", 800, rate = FrenchVat.NORMAL, destination = "BAR")
-    private val coca = line("l5", "Coca", 100, rate = FrenchVat.NORMAL, destination = "BAR").copy(parentLineId = "l4")
+    private val coca = line("l5", "Coca", 100, rate = FrenchVat.NORMAL, destination = "BAR").copy(parentLineId = "l4", role = LineRole.MODIFIER)
 
     @Test fun `bon cuisine - sous-lignes en retrait sous leur produit`() {
         val t = KitchenDispatcher.send(order(pizza, oeuf, sansOlives), ids).tickets.single()

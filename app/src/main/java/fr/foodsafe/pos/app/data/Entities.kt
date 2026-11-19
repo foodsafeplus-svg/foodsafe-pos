@@ -40,6 +40,10 @@ data class OrderLineEntity(
     val cancelledAt: Long?,
     /** v4 : commentaire ou supplément rattaché à cette ligne parente. */
     val parentLineId: String? = null,
+    /** v5 : rôle (PRODUCT, MODIFIER, FORMULA, COMPONENT) ; null = déduit (lignes v4). */
+    val role: String? = null,
+    /** v5 : promotion automatique appliquée (ou « REFUSED »). */
+    val promoGroup: String? = null,
 )
 
 /** Bon cuisine produit (aperçu ; deviendra un print_job dans la couche matérielle). */

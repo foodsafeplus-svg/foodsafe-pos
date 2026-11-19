@@ -42,9 +42,16 @@ object ReceiptRenderer {
         if (doc.type == FiscalDocType.Z) return (out + renderZ(doc, date, sep, ::lr)).flatMap { it.chunked(columns) }
 
         doc.tableLabel?.let { out += it }
-        for (l in doc.lines) {
+        doc.lines.forEachIndexed { i, l ->
             val qty = KitchenTicketRenderer.formatQty(l.quantityMilli)
-            out += lr("$qty x ${l.label}", l.gross.format(false))
+            when {
+                // composant de formule : sans prix, le total est sur l'en-tête
+                l.label.startsWith(COMPONENT_PREFIX) -> out += "    " + l.label.removePrefix(COMPONENT_PREFIX)
+                else -> {
+                    val components = doc.lines.drop(i + 1).takeWhile { it.label.startsWith(COMPONENT_PREFIX) }
+                    out += lr("$qty x ${l.label}", (if (components.isEmpty()) l.gross else Cents(components.sumOf { it.gross.value })).format(false))
+                }
+            }
             if (!l.discount.isZero) out += lr("   remise", "-" + l.discount.format(false))
         }
         out += sep

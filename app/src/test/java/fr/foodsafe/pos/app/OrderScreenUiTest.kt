@@ -11,6 +11,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.printToLog
 import org.junit.Rule
 import org.junit.Test
@@ -162,7 +165,7 @@ class OrderScreenUiTest {
         rule.onNodeWithText("+ Nouveau produit").performClick()
         waitText("Nouveau produit")
         rule.onNode(hasSetTextAction() and hasText("Nom")).performTextInput("Sirop menthe")
-        rule.onNode(hasSetTextAction() and hasText("Prix TTC (€)")).performTextInput("2,50")
+        rule.onNode(hasSetTextAction() and hasText("Prix de vente TTC normal (€)")).performTextInput("2,50")
         rule.onNodeWithText("Enregistrer").performClick()
         waitText("TOUS LES PRODUITS (${avant + 1})")
         waitText("Sirop menthe")
@@ -289,6 +292,45 @@ class OrderScreenUiTest {
         waitText("Schweppes")
         waitText("+1,20 €")
         capture("13-commentaires-supplements")
+    }
+
+    @Test fun appuiLongModifierEtDeplacerUneTouche() {
+        waitText("Saisissez votre code PIN")
+        pin("1111")
+        waitText("Nouvelle table")
+        rule.onNodeWithText("Nouvelle table").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput("61")
+        rule.onNodeWithText("Ouvrir").performClick()
+        waitText("Salade César")
+        rule.onNodeWithText("Burrata").performTouchInput { longClick() }
+        waitText("réservé au responsable", substring = true)
+        rule.onNodeWithText("Déconnexion").performClick()
+
+        waitText("Saisissez votre code PIN")
+        pin("9999")
+        waitText("Nouvelle table")
+        rule.onNodeWithText("Nouvelle table").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput("62")
+        rule.onNodeWithText("Ouvrir").performClick()
+        waitText("Salade César")
+        // modifier le prix depuis l'appui long
+        rule.onNodeWithText("Burrata").performTouchInput { longClick() }
+        rule.onNodeWithText("Modifier le produit").performClick()
+        waitText("Prix de vente TTC normal (€)")
+        rule.onNode(hasSetTextAction() and hasText("Prix de vente TTC normal (€)")).performTextReplacement("11,50")
+        rule.onNodeWithText("Enregistrer").performClick()
+        waitText("11,50")
+        rule.onNodeWithText("Burrata").performClick()
+        waitText("NET À PAYER : 11,50 €")
+        // déplacer la Salade César sur la première case libre
+        rule.onNodeWithText("Salade César").performTouchInput { longClick() }
+        rule.onNodeWithText("Déplacer la touche").performClick()
+        waitText("touchez la case d'arrivée", substring = true)
+        capture("14-deplacer-touche")
+        rule.onAllNodesWithText("+")[0].performClick()
+        waitText("Touche déplacée")
+        rule.onNodeWithText("Salade César").performClick()
+        waitText("NET À PAYER : 21,00 €")
     }
 
     private fun productCount(): Int = rule.onAllNodes(hasText("TOUS LES PRODUITS (", substring = true)).fetchSemanticsNodes()

@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR, CATALOG, KEYBOARDS, PRODUCTS, IMAGES, WIZARD, MODIFIERS }
+enum class Screen { TABLES, ORDER, DOCUMENTS, CLOSURE, KITCHEN, JOURNAL, HOME, CASH_COUNT, CALCULATOR, CATALOG, KEYBOARDS, PRODUCTS, IMAGES, WIZARD, MODIFIERS, FORMULAS }
 
 data class TableSummary(val orderId: String, val table: String, val ownerId: String, val status: OrderStatus, val total: Cents)
 
@@ -118,12 +118,18 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     fun newProductId() = repo.catalog.newProductId()
     fun addKeyboard(name: String) = catalogEdit("Clavier créé") { repo.catalog.addKeyboard(it, name) }
     fun renameKeyboard(id: String, name: String) = catalogEdit { repo.catalog.renameKeyboard(it, id, name) }
-    fun addPage(keyboardId: String, name: String, visible: Boolean) = catalogEdit("Page créée") { repo.catalog.addPage(it, keyboardId, name, visible) }
+    fun addPage(keyboardId: String, name: String, visible: Boolean, onDone: (String) -> Unit = {}) =
+        act<String>("Page créée", onSuccess = onDone) { _, _ -> repo.catalog.addPage(userId(), keyboardId, name, visible) }
     fun updatePage(pageId: String, name: String? = null, visible: Boolean? = null) = catalogEdit { repo.catalog.updatePage(it, pageId, name, visible) }
     fun movePage(pageId: String, delta: Int) = catalogEdit { repo.catalog.movePage(it, pageId, delta) }
     fun deletePage(pageId: String) = catalogEdit("Page supprimée") { repo.catalog.deletePage(it, pageId) }
     fun setProductCell(pageId: String, slot: Int, productId: String, color: Int?) = catalogEdit { repo.catalog.setProductCell(it, pageId, slot, productId, color) }
     fun setPageLinkCell(pageId: String, slot: Int, target: String, color: Int?) = catalogEdit { repo.catalog.setPageLinkCell(it, pageId, slot, target, color) }
+    fun moveCell(fromPage: String, fromSlot: Int, toPage: String, toSlot: Int) =
+        catalogEdit("Touche déplacée") { repo.catalog.moveCell(it, fromPage, fromSlot, toPage, toSlot) }
+    /** La modification du catalogue est réservée au responsable (règle EDIT_CATALOG). */
+    val canEditCatalog get() = _state.value.user?.role != fr.foodsafe.pos.core.auth.Role.SERVER
+    fun notify(text: String) { _state.value = _state.value.copy(message = text) }
     fun clearCell(pageId: String, slot: Int) = catalogEdit { repo.catalog.clearCell(it, pageId, slot) }
     fun createAndPlace(p: Product, pageId: String, slot: Int, onDone: () -> Unit) =
         act<Product>("Produit « ${p.label} » créé et placé", onSuccess = { onDone() }) { _, _ -> repo.catalog.createAndPlace(userId(), p, pageId, slot) }
@@ -133,6 +139,10 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     fun saveModifier(item: ModifierItem) = catalogEdit("Élément enregistré") { repo.catalog.saveItem(it, item) }
     fun deleteModifier(id: String) = catalogEdit("Élément supprimé") { repo.catalog.deleteItem(it, id) }
     fun setProductGroups(productId: String, groupIds: List<String>) = catalogEdit { repo.catalog.setProductGroups(it, productId, groupIds) }
+    fun saveFormula(f: fr.foodsafe.pos.app.data.Formula, onDone: (String) -> Unit = {}) =
+        act<String>("Formule enregistrée", onSuccess = onDone) { _, _ -> repo.catalog.saveFormula(userId(), f) }
+    fun deleteFormula(id: String) = catalogEdit("Formule supprimée") { repo.catalog.deleteFormula(it, id) }
+    fun setFormulaCell(pageId: String, slot: Int, formulaId: String, color: Int?) = catalogEdit { repo.catalog.setFormulaCell(it, pageId, slot, formulaId, color) }
     fun deleteImage(id: String) = catalogEdit("Image supprimée") { repo.catalog.deleteImage(it, id) }
 
     /** Importe une image choisie sur la tablette : réduite à 256 px max, enregistrée en JPEG dans le stockage privé. */
@@ -264,6 +274,10 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     fun selectLevel(level: ServiceLevel?) { touch(); _state.value = _state.value.copy(selectedLevel = level) }
     fun add(p: Product, modifiers: List<ModifierItem> = emptyList()) =
         act(onSuccess = ::update) { k, _ -> repo.addProduct(orderId(), userId(), p, _state.value.selectedLevel, k, modifiers) }
+    fun addFormula(f: fr.foodsafe.pos.app.data.Formula, picks: List<Product>) =
+        act(onSuccess = ::update) { k, _ -> repo.addFormula(orderId(), userId(), f, picks, k) }
+    fun removePromo(lineId: String, reason: String) =
+        act("Promotion retirée", onSuccess = ::update) { k, a -> repo.removePromo(orderId(), userId(), lineId, reason, k, a) }
     fun addModifiers(lineId: String, modifiers: List<ModifierItem>) =
         act(onSuccess = ::update) { k, _ -> repo.addModifiers(orderId(), userId(), lineId, modifiers, k) }
     fun send() = act("Commande envoyée en cuisine", onSuccess = ::update) { k, _ -> repo.sendToKitchen(orderId(), userId(), k) }

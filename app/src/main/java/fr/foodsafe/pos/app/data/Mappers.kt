@@ -37,6 +37,9 @@ fun OrderLineEntity.toDomain() = OrderLine(
     dispatchId = dispatchId,
     cancellation = cancelReason?.let { Cancellation(it, cancelledBy!!, cancelledAt!!) },
     parentLineId = parentLineId,
+    role = role?.let(fr.foodsafe.pos.core.order.LineRole::valueOf)
+        ?: if (parentLineId != null) fr.foodsafe.pos.core.order.LineRole.MODIFIER else fr.foodsafe.pos.core.order.LineRole.PRODUCT,
+    promoGroup = promoGroup,
 )
 
 fun Order.toEntity(openedAt: Long) = OrderEntity(
@@ -55,6 +58,8 @@ fun OrderLine.toEntity(orderId: String, position: Int) = OrderLineEntity(
     dispatchId = dispatchId,
     cancelReason = cancellation?.reason, cancelledBy = cancellation?.byEmployeeId, cancelledAt = cancellation?.at,
     parentLineId = parentLineId,
+    role = role.name,
+    promoGroup = promoGroup,
 )
 
 fun JournalEventEntity.toDomain() = JournalEvent(

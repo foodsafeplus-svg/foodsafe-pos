@@ -13,6 +13,17 @@ sealed interface KeyboardCell {
     val color: Int?
     data class ProductCell(override val slot: Int, val product: Product, override val color: Int?) : KeyboardCell
     data class PageLink(override val slot: Int, val page: KeyboardPage, override val color: Int?) : KeyboardCell
+    data class FormulaCell(override val slot: Int, val formula: Formula, override val color: Int?) : KeyboardCell
+}
+
+enum class FormulaKind(val label: String) { MENU("Formule"), PACKAGE("Package"), PROMO("Promo automatique") }
+
+/** Étape de formule : produits possibles et niveau d'envoi (null = niveau du produit). */
+data class FormulaStep(val id: String, val name: String, val level: ServiceLevel?, val productIds: List<String>)
+
+data class Formula(val id: String, val name: String, val kind: FormulaKind, val price: Cents, val steps: List<FormulaStep>) {
+    /** Toutes les étapes n'ont qu'un produit possible : ajout direct, sans question. */
+    val isFixed get() = steps.all { it.productIds.size == 1 }
 }
 
 data class KeyboardPage(val id: String, val keyboardId: String, val name: String, val position: Int, val visible: Boolean)
@@ -34,6 +45,7 @@ data class ModifierGroup(val id: String, val name: String, val mandatory: Boolea
 data class CatalogState(
     val products: List<Product>, val keyboards: List<Keyboard>, val images: List<CatalogImage> = emptyList(),
     val groups: List<ModifierGroup> = emptyList(),
+    val formulas: List<Formula> = emptyList(),
     /** Produit → groupes proposés à la vente, dans l'ordre. */
     val productGroups: Map<String, List<String>> = emptyMap(),
 ) {
@@ -66,15 +78,27 @@ class CatalogRepository internal constructor(
                 links.groupBy({ it.productId }, { it.groupId })
         }
 
-    val state: Flow<CatalogState> = combine(
-        combine(dao.observeProducts(), dao.observeKeyboards(), dao.observePages(), dao.observeCells()) { p, k, pg, c -> build(p, k, pg, c) },
-        dao.observeImages(),
-        modifiers,
-    ) { st, imgs, (groups, links) ->
-        st.copy(images = imgs.map { CatalogImage(it.id, it.name, imagesDir?.let { d -> java.io.File(d, it.fileName) }) }, groups = groups, productGroups = links)
+    private val formulas: Flow<List<Formula>> = combine(dao.observeFormulas(), dao.observeFormulaSteps()) { f, s ->
+        val steps = s.groupBy { it.formulaId }
+        f.map { it.toDomain(steps[it.id].orEmpty()) }
     }
 
-    private fun build(p: List<ProductEntity>, k: List<KeyboardEntity>, pg: List<KeyboardPageEntity>, c: List<KeyboardCellEntity>): CatalogState {
+    private data class Raw(val p: List<ProductEntity>, val k: List<KeyboardEntity>, val pg: List<KeyboardPageEntity>, val c: List<KeyboardCellEntity>)
+
+    val state: Flow<CatalogState> = combine(
+        combine(dao.observeProducts(), dao.observeKeyboards(), dao.observePages(), dao.observeCells(), ::Raw),
+        dao.observeImages(),
+        modifiers,
+        formulas,
+    ) { r, imgs, (groups, links), f ->
+        build(r.p, r.k, r.pg, r.c, f).copy(
+            images = imgs.map { CatalogImage(it.id, it.name, imagesDir?.let { d -> java.io.File(d, it.fileName) }) },
+            groups = groups, productGroups = links, formulas = f,
+        )
+    }
+
+    private fun build(p: List<ProductEntity>, k: List<KeyboardEntity>, pg: List<KeyboardPageEntity>, c: List<KeyboardCellEntity>, f: List<Formula>): CatalogState {
+        val formulaById = f.associateBy { it.id }
         val products = p.map { it.toDomain() }
         val byId = products.associateBy { it.id }
         val pages = pg.map { KeyboardPage(it.id, it.keyboardId, it.name, it.position, it.visible) }
@@ -83,6 +107,7 @@ class CatalogRepository internal constructor(
             when (e.kind) {
                 "PRODUCT" -> byId[e.targetId]?.takeIf { it.active }?.let { KeyboardCell.ProductCell(e.slot, it, e.color) }
                 "PAGE" -> pageById[e.targetId]?.let { KeyboardCell.PageLink(e.slot, it, e.color) }
+                "FORMULA" -> formulaById[e.targetId]?.takeIf { it.kind != FormulaKind.PROMO }?.let { KeyboardCell.FormulaCell(e.slot, it, e.color) }
                 else -> null
             }?.let { e.pageId to it }
         }.groupBy({ it.first }, { it.second }).mapValues { (_, v) -> v.associateBy { it.slot } }
@@ -120,6 +145,73 @@ class CatalogRepository internal constructor(
         val pizzas = dao.products().filter { it.category == "Pizzas" }.map { it.id }
         dao.upsertProductGroups(pizzas.map { ProductModifierGroupEntity(it, "grp-pizza", 0) })
     }
+
+    /** Exemples de formules, posés une seule fois, avec une page « Formules » sur le premier clavier. */
+    fun seedFormulasIfEmpty() = db.runInTransaction {
+        if (dao.allFormulas().isNotEmpty()) return@runInTransaction
+        val products = dao.products().filter { it.active }
+        fun cat(c: String) = products.filter { it.category == c }.joinToString(",") { it.id }
+        fun formula(id: String, name: String, kind: FormulaKind, cents: Long, pos: Int, vararg steps: Triple<String, Int?, String>) {
+            dao.upsertFormula(FormulaEntity(id, name, kind.name, cents, pos, false))
+            dao.upsertFormulaSteps(steps.mapIndexed { i, (n, lvl, ids) -> FormulaStepEntity("$id-s${i + 1}", id, n, lvl, ids, i) }.filter { it.productIds.isNotEmpty() })
+        }
+        formula("f-midi", "Formule midi", FormulaKind.MENU, 1990, 0,
+            Triple("Pizza", null, cat("Pizzas")), Triple("Boisson", 0, cat("Softs")), Triple("Dessert", null, cat("Desserts")))
+        formula("f-apero", "Apéro", FormulaKind.PACKAGE, 1100, 1,
+            Triple("Bière", null, products.firstOrNull { it.id == "biere" }?.id ?: ""), Triple("Bruschetta", null, products.firstOrNull { it.id == "bruschetta" }?.id ?: ""))
+        formula("f-promo-soda", "Pizza + soda", FormulaKind.PROMO, 1500, 2,
+            Triple("Pizza", null, cat("Pizzas")), Triple("Soda", null, products.firstOrNull { it.id == "soda" }?.id ?: ""))
+        val kb = dao.keyboards().firstOrNull() ?: return@runInTransaction
+        val pageId = "page-formules"
+        dao.upsertPage(KeyboardPageEntity(pageId, kb.id, "Formules", dao.pages(kb.id).size, true))
+        dao.upsertCells(listOf("f-midi", "f-apero").filter { id -> dao.formulaSteps(id).isNotEmpty() }
+            .mapIndexed { i, id -> KeyboardCellEntity(pageId, i, "FORMULA", id, null) })
+    }
+
+    // ---------- Formules ----------
+
+    fun saveFormula(actorId: String, f: Formula): String {
+        requireRight(actorId)
+        require(f.name.isNotBlank()) { "nom de la formule requis" }
+        require(!f.price.isNegative) { "prix négatif" }
+        require(f.steps.isNotEmpty() && f.steps.all { it.productIds.isNotEmpty() }) { "chaque étape doit proposer au moins un produit" }
+        if (f.kind == FormulaKind.PACKAGE) require(f.steps.all { it.productIds.size == 1 }) { "un package contient des articles fixes (un produit par ligne)" }
+        return db.runInTransaction<String> {
+            val before = dao.formula(f.id)
+            val id = before?.id ?: ("f-" + ids())
+            dao.upsertFormula(FormulaEntity(id, f.name.trim(), f.kind.name, f.price.value, before?.position ?: dao.allFormulas().size, false))
+            val beforeSteps = dao.formulaSteps(id)
+            dao.clearFormulaSteps(id)
+            dao.upsertFormulaSteps(f.steps.mapIndexed { i, s -> FormulaStepEntity("$id-s${i + 1}", id, s.name.trim().ifBlank { "Étape ${i + 1}" }, s.level?.value, s.productIds.joinToString(","), i) })
+            if (f.kind == FormulaKind.PROMO) dao.deleteFormulaCells(id)
+            log(actorId, if (before == null) "FORMULA_CREATED" else "FORMULA_UPDATED", "formula", id,
+                before?.let { formulaSummary(it, beforeSteps) }, formulaSummary(dao.formula(id)!!, dao.formulaSteps(id)))
+            id
+        }
+    }
+
+    fun deleteFormula(actorId: String, id: String) {
+        requireRight(actorId)
+        db.runInTransaction {
+            val f = dao.formula(id) ?: error("formule inconnue")
+            dao.upsertFormula(f.copy(deleted = true)); dao.deleteFormulaCells(id)
+            log(actorId, "FORMULA_DELETED", "formula", id, f.name, null)
+        }
+    }
+
+    fun setFormulaCell(actorId: String, pageId: String, slot: Int, formulaId: String, color: Int?) = edit(actorId, "KEYBOARD_UPDATED", pageId) {
+        val f = dao.formula(formulaId) ?: error("formule inconnue")
+        require(f.kind != FormulaKind.PROMO.name) { "une promo s'applique seule : elle ne se place pas sur le clavier" }
+        dao.upsertCell(KeyboardCellEntity(pageId, slot, "FORMULA", formulaId, color))
+    }
+
+    /** Promotions actives, au format du moteur de promo. */
+    fun promoRules(): List<fr.foodsafe.pos.core.order.PromoRule> =
+        dao.allFormulas().filter { !it.deleted && it.kind == FormulaKind.PROMO.name }.map { f ->
+            fr.foodsafe.pos.core.order.PromoRule(f.id, f.name, Cents(f.priceCents), dao.formulaSteps(f.id).map { s -> s.productIds.split(',').filter(String::isNotBlank).toSet() })
+        }
+
+    fun formulaName(id: String?): String? = id?.let { dao.formula(it)?.name }
 
     // ---------- Commentaires et suppléments ----------
 
@@ -297,6 +389,19 @@ class CatalogRepository internal constructor(
         dao.upsertCell(KeyboardCellEntity(pageId, slot, "PAGE", targetPageId, color))
     }
 
+    /** Déplace une touche ; si la case d'arrivée est occupée, les deux touches s'échangent. */
+    fun moveCell(actorId: String, fromPage: String, fromSlot: Int, toPage: String, toSlot: Int) = edit(actorId, "KEYBOARD_UPDATED", toPage) {
+        if (fromPage == toPage && fromSlot == toSlot) return@edit
+        val moving = dao.cell(fromPage, fromSlot) ?: error("touche introuvable")
+        require(dao.page(toPage) != null) { "page inconnue" }
+        if (moving.kind == "PAGE") require(moving.targetId != toPage) { "une page ne peut pas renvoyer vers elle-même" }
+        val other = dao.cell(toPage, toSlot)
+        if (other?.kind == "PAGE") require(other.targetId != fromPage) { "une page ne peut pas renvoyer vers elle-même" }
+        dao.deleteCell(fromPage, fromSlot); dao.deleteCell(toPage, toSlot)
+        dao.upsertCell(moving.copy(pageId = toPage, slot = toSlot))
+        other?.let { dao.upsertCell(it.copy(pageId = fromPage, slot = fromSlot)) }
+    }
+
     fun clearCell(actorId: String, pageId: String, slot: Int) = edit(actorId, "KEYBOARD_UPDATED", pageId) { dao.deleteCell(pageId, slot) }
 
     /** Première case libre d'une page (pour l'assistant de création). */
@@ -310,16 +415,32 @@ class CatalogRepository internal constructor(
 
 internal fun ProductEntity.toDomain() = Product(
     id, label, Cents(priceCents), BasisPoints(vatBp), destination, ServiceLevel(defaultLevel), category, subCategory, imageId, color, active,
+    internalCode, description, price1Cents?.let(::Cents), price2Cents?.let(::Cents), formulaPriceCents?.let(::Cents),
+    Cents(ecoDeeeCents), Cents(ecoDeaCents), openPrice, runCatching { GoodsType.valueOf(goodsType) }.getOrDefault(GoodsType.PRODUCT), outOfTurnover,
 )
 
 internal fun Product.toEntity(now: Long) = ProductEntity(
     id, label, price.value, vat.value, destination, defaultLevel.value, category, subCategory, imageId, color, active, now,
+    internalCode, description, price1?.value, price2?.value, formulaPrice?.value, ecoDeee.value, ecoDea.value, openPrice, goodsType.name, outOfTurnover,
 )
 
 private fun ProductEntity.summary() = JSONObject()
     .put("label", label).put("priceCents", priceCents).put("vatBp", vatBp).put("category", category)
     .put("subCategory", subCategory ?: "").put("level", defaultLevel).put("destination", destination).put("active", active)
+    .put("code", internalCode ?: "").put("price1", price1Cents ?: JSONObject.NULL).put("price2", price2Cents ?: JSONObject.NULL)
+    .put("formulaPrice", formulaPriceCents ?: JSONObject.NULL).put("ecoDeee", ecoDeeeCents).put("ecoDea", ecoDeaCents)
+    .put("openPrice", openPrice).put("goodsType", goodsType).put("outOfTurnover", outOfTurnover)
     .toString()
 
 private fun ModifierItemEntity.summary() = JSONObject()
     .put("groupId", groupId).put("label", label).put("priceCents", priceCents).put("vatBp", vatBp ?: JSONObject.NULL).toString()
+
+internal fun FormulaEntity.toDomain(steps: List<FormulaStepEntity>) = Formula(
+    id, name, FormulaKind.valueOf(kind), Cents(priceCents),
+    steps.sortedBy { it.position }.map { FormulaStep(it.id, it.name, it.level?.let(::ServiceLevel), it.productIds.split(',').filter(String::isNotBlank)) },
+)
+
+private fun formulaSummary(f: FormulaEntity, steps: List<FormulaStepEntity>) = JSONObject()
+    .put("name", f.name).put("kind", f.kind).put("priceCents", f.priceCents)
+    .put("steps", org.json.JSONArray(steps.map { JSONObject().put("name", it.name).put("level", it.level ?: JSONObject.NULL).put("products", it.productIds) }))
+    .toString()

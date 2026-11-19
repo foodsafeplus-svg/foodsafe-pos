@@ -18,7 +18,25 @@ data class Product(
     val imageId: String? = null,
     val color: Int? = null,
     val active: Boolean = true,
+    // ---- Fiche produit, onglet Général (v5)
+    val internalCode: String? = null,
+    val description: String? = null,
+    /** Tarifs 1 et 2 (ex. happy hour, emporter) ; le tarif normal reste [price]. */
+    val price1: Cents? = null,
+    val price2: Cents? = null,
+    /** Valeur du produit dans une formule ou une composition (base de la ventilation) ; null = prix normal. */
+    val formulaPrice: Cents? = null,
+    /** Éco-participations incluses dans le prix (« dont »), informatives. */
+    val ecoDeee: Cents = Cents.ZERO,
+    val ecoDea: Cents = Cents.ZERO,
+    /** Prix libre : le prix est demandé à chaque vente. */
+    val openPrice: Boolean = false,
+    val goodsType: GoodsType = GoodsType.PRODUCT,
+    /** Hors chiffre d'affaires (ex. consigne, carte cadeau) : enregistré, sans effet sur les totaux pour l'instant. */
+    val outOfTurnover: Boolean = false,
 )
+
+enum class GoodsType(val label: String) { PRODUCT("Produit"), MERCHANDISE("Marchandise"), SERVICE("Service") }
 
 /** Catalogue de démonstration : copié en base au premier lancement, puis modifiable dans « Produits et claviers ». */
 object DemoCatalog {

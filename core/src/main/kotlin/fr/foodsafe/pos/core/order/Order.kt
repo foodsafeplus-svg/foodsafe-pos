@@ -17,6 +17,13 @@ value class ServiceLevel(val value: Int) {
     companion object { val DIRECT = ServiceLevel(0) }
 }
 
+/**
+ * Rôle d'une ligne. PRODUCT : article simple. MODIFIER : commentaire ou supplément (sous-ligne).
+ * FORMULA : en-tête d'une formule (montant porté par ses composants). COMPONENT : article d'une formule,
+ * au prix ventilé (pour une TVA juste par taux).
+ */
+enum class LineRole { PRODUCT, MODIFIER, FORMULA, COMPONENT }
+
 data class Cancellation(val reason: String, val byEmployeeId: String, val at: Long)
 
 data class OrderLine(
@@ -41,9 +48,14 @@ data class OrderLine(
      * la destination et l'envoi de sa ligne parente, et il est annulé avec elle.
      */
     val parentLineId: String? = null,
+    val role: LineRole = if (parentLineId != null) LineRole.MODIFIER else LineRole.PRODUCT,
+    /** Promotion appliquée automatiquement (même valeur pour les lignes de la combinaison) ; « REFUSED » = promo retirée. */
+    val promoGroup: String? = null,
 ) {
     init { require(quantityMilli > 0) { "quantité strictement positive" } }
-    val isModifier get() = parentLineId != null
+    val isModifier get() = role == LineRole.MODIFIER
+    val isFormulaHeader get() = role == LineRole.FORMULA
+    val isComponent get() = role == LineRole.COMPONENT
     val isSent get() = dispatchId != null
     val isActive get() = cancellation == null
 }

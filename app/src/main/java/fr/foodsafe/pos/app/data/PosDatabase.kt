@@ -15,13 +15,15 @@ import fr.foodsafe.pos.core.journal.JournalSchema
         EmployeeEntity::class, FiscalDocumentEntity::class, FiscalKeyEntity::class,
         ProductEntity::class, KeyboardEntity::class, KeyboardPageEntity::class, KeyboardCellEntity::class, ImageEntity::class,
         ModifierGroupEntity::class, ModifierItemEntity::class, ProductModifierGroupEntity::class,
+        FormulaEntity::class, FormulaStepEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
     // v1 (incrément 1) → v2 : ajout des tables employés, documents fiscaux et clés. Aucune donnée existante modifiée.
     // v2 → v3 : catalogue éditable (produits, claviers, pages, cases, images). Nouvelles tables uniquement.
     // v3 → v4 : commentaires et suppléments (nouvelles tables) + colonne nullable order_lines.parentLineId.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5)],
+    // v4 → v5 : formules (nouvelles tables) + colonnes nullables order_lines.role et promoGroup.
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao

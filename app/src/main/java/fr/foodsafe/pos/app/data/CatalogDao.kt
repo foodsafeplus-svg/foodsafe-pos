@@ -27,6 +27,7 @@ interface CatalogDao {
 
     @Query("SELECT * FROM keyboard_cells") fun observeCells(): Flow<List<KeyboardCellEntity>>
     @Upsert fun upsertCell(c: KeyboardCellEntity)
+    @Query("SELECT * FROM keyboard_cells WHERE pageId = :pageId AND slot = :slot") fun cell(pageId: String, slot: Int): KeyboardCellEntity?
     @Upsert fun upsertCells(c: List<KeyboardCellEntity>)
     @Query("DELETE FROM keyboard_cells WHERE pageId = :pageId AND slot = :slot") fun deleteCell(pageId: String, slot: Int)
     @Query("DELETE FROM keyboard_cells WHERE pageId = :pageId") fun deleteCellsOf(pageId: String)
@@ -51,4 +52,14 @@ interface CatalogDao {
     @Upsert fun upsertProductGroups(l: List<ProductModifierGroupEntity>)
     @Query("DELETE FROM product_modifier_groups WHERE productId = :productId") fun clearProductGroups(productId: String)
     @Query("DELETE FROM product_modifier_groups WHERE groupId = :groupId") fun unlinkGroup(groupId: String)
+
+    @Query("SELECT * FROM formulas WHERE deleted = 0 ORDER BY position") fun observeFormulas(): Flow<List<FormulaEntity>>
+    @Query("SELECT * FROM formulas ORDER BY position") fun allFormulas(): List<FormulaEntity>
+    @Query("SELECT * FROM formulas WHERE id = :id") fun formula(id: String): FormulaEntity?
+    @Upsert fun upsertFormula(f: FormulaEntity)
+    @Query("SELECT * FROM formula_steps ORDER BY formulaId, position") fun observeFormulaSteps(): Flow<List<FormulaStepEntity>>
+    @Query("SELECT * FROM formula_steps WHERE formulaId = :formulaId ORDER BY position") fun formulaSteps(formulaId: String): List<FormulaStepEntity>
+    @Upsert fun upsertFormulaSteps(s: List<FormulaStepEntity>)
+    @Query("DELETE FROM formula_steps WHERE formulaId = :formulaId") fun clearFormulaSteps(formulaId: String)
+    @Query("DELETE FROM keyboard_cells WHERE kind = 'FORMULA' AND targetId = :formulaId") fun deleteFormulaCells(formulaId: String)
 }

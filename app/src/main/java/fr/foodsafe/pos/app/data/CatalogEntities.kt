@@ -19,6 +19,16 @@ data class ProductEntity(
     val color: Int?,
     val active: Boolean,
     val updatedAt: Long,
+    @androidx.room.ColumnInfo(defaultValue = "NULL") val internalCode: String? = null,
+    @androidx.room.ColumnInfo(defaultValue = "NULL") val description: String? = null,
+    @androidx.room.ColumnInfo(defaultValue = "NULL") val price1Cents: Long? = null,
+    @androidx.room.ColumnInfo(defaultValue = "NULL") val price2Cents: Long? = null,
+    @androidx.room.ColumnInfo(defaultValue = "NULL") val formulaPriceCents: Long? = null,
+    @androidx.room.ColumnInfo(defaultValue = "0") val ecoDeeeCents: Long = 0,
+    @androidx.room.ColumnInfo(defaultValue = "0") val ecoDeaCents: Long = 0,
+    @androidx.room.ColumnInfo(defaultValue = "0") val openPrice: Boolean = false,
+    @androidx.room.ColumnInfo(defaultValue = "PRODUCT") val goodsType: String = "PRODUCT",
+    @androidx.room.ColumnInfo(defaultValue = "0") val outOfTurnover: Boolean = false,
 )
 
 @Entity(tableName = "keyboards")
@@ -87,5 +97,30 @@ data class ModifierItemEntity(
 data class ProductModifierGroupEntity(
     val productId: String,
     val groupId: String,
+    val position: Int,
+)
+
+/**
+ * Formule. kind : MENU (étapes au choix, chacune avec son niveau d'envoi : formule directe ou de service),
+ * PACKAGE (articles fixes sous un bouton), PROMO (combinaison reconnue automatiquement sur la note).
+ */
+@Entity(tableName = "formulas")
+data class FormulaEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val kind: String,
+    val priceCents: Long,
+    val position: Int,
+    val deleted: Boolean,
+)
+
+/** Étape d'une formule : produits possibles (ids séparés par des virgules) et niveau d'envoi (null = celui du produit). */
+@Entity(tableName = "formula_steps", indices = [Index("formulaId")])
+data class FormulaStepEntity(
+    @PrimaryKey val id: String,
+    val formulaId: String,
+    val name: String,
+    val level: Int?,
+    val productIds: String,
     val position: Int,
 )

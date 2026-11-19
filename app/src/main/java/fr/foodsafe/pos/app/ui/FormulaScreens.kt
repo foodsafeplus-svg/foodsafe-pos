@@ -58,7 +58,7 @@ internal fun FormulaDialog(f: Formula, products: List<Product>, onDismiss: () ->
         onDismissRequest = onDismiss,
         title = { Text("${f.name} · ${f.price.format()}") },
         text = {
-            Column(Modifier.width(640.dp).heightIn(max = 540.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.width(560.dp).heightIn(max = 540.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 f.steps.forEachIndexed { i, s ->
                     Text(s.name + (s.level?.let { " · envoi ${it.label}" } ?: ""), fontWeight = FontWeight.Bold, color = if (picks[i] == null) Warn else Navy, fontSize = 15.sp)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -210,7 +210,7 @@ private fun ProductPicker(products: List<Product>, initial: List<String>, single
         onDismissRequest = onDismiss,
         title = { Text(if (single) "Article du package" else "Produits proposés à cette étape") },
         text = {
-            Column(Modifier.width(600.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.width(560.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     categories.forEach { c -> Chip(c, c == category) { category = c } }
                 }

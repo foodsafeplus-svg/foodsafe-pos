@@ -338,7 +338,8 @@ internal fun ProductsScreen(vm: PosViewModel) {
         ProductDialog(p, catalog?.categories.orEmpty(), isNew = products.none { it.id == p.id },
             onSave = { vm.saveProduct(it); editing = null }, onDismiss = { editing = null }, images = catalog?.images.orEmpty(),
             groups = catalog?.groups.orEmpty(), initialGroups = catalog?.productGroups?.get(p.id).orEmpty(),
-            onSaveGroups = { vm.setProductGroups(p.id, it) })
+            onSaveGroups = { vm.setProductGroups(p.id, it) },
+            subCategories = catalog?.products.orEmpty().mapNotNull { it.subCategory }.distinct().sorted())
     }
 }
 
@@ -359,9 +360,74 @@ private fun AmountField(label: String, value: String, onChange: (String) -> Unit
     }
 }
 
+/** Ligne de la fiche : libellé à gauche (colonne fixe), champ(s) à droite. */
+@Composable
+private fun SheetRow(label: String, modifier: Modifier = Modifier, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label.uppercase(), Modifier.width(150.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Navy)
+        content()
+    }
+}
+
+/** Champ texte compact (44 dp) ; le libellé est dans la colonne de gauche. */
+@Composable
+private fun SheetField(
+    value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "", isError: Boolean = false,
+    numeric: Boolean = false, tag: String? = null, trailing: (@Composable () -> Unit)? = null,
+) {
+    androidx.compose.foundation.text.BasicTextField(
+        value, { v -> onChange(if (numeric) v.filter { it.isDigit() || it == ',' || it == '.' }.take(8) else v) },
+        modifier.height(44.dp).then(if (tag != null) Modifier.testTag(tag) else Modifier),
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Navy),
+        keyboardOptions = if (numeric) androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal)
+            else androidx.compose.foundation.text.KeyboardOptions.Default,
+        decorationBox = { inner ->
+            Row(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).background(Color.White)
+                    .border(1.5.dp, if (isError) Color(0xFFC62828) else Color(0xFFB9C0CC), RoundedCornerShape(6.dp)).padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) Text(placeholder, color = Muted, fontSize = 16.sp)
+                    inner()
+                }
+                trailing?.invoke()
+            }
+        },
+    )
+}
+
+/** Montant avec −0,1 / +0,1. */
+@Composable
+private fun SheetAmount(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, steps: Boolean = false, tag: String? = null) {
+    val cents = if (value.isBlank()) Cents.ZERO else parsePrice(value)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        SheetField(value, onChange, Modifier.weight(1f), placeholder = "0,00", isError = cents == null, numeric = true, tag = tag)
+        if (steps) {
+            PadKey("−0,1", Modifier.size(54.dp, 44.dp), fontSize = 14.sp) { cents?.let { onChange(Cents(maxOf(0, it.value - 10)).edit()) } }
+            PadKey("+0,1", Modifier.size(54.dp, 44.dp), fontSize = 14.sp) { onChange(Cents((cents?.value ?: 0) + 10).edit()) }
+        }
+    }
+}
+
+/** Liste déroulante éditable (choisir une valeur existante ou en saisir une nouvelle). */
+@Composable
+private fun SheetDropdown(value: String, options: List<String>, onChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "") {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        SheetField(value, onChange, Modifier.fillMaxWidth(), placeholder = placeholder,
+            trailing = { Text("▼", Modifier.clickable { open = true }.padding(8.dp), color = Navy) })
+        androidx.compose.material3.DropdownMenu(open, { open = false }) {
+            options.forEach { o -> androidx.compose.material3.DropdownMenuItem(text = { Text(o) }, onClick = { onChange(o); open = false }) }
+        }
+    }
+}
+
 /**
- * Fiche produit en onglets. Général : identité, prix (normal, tarifs 1 et 2, prix en formule), éco-participations,
- * prix libre, TVA, type de bien, hors CA. Avancé : envoi en préparation, commentaires, activation. Apparence : image.
+ * Fiche produit plein écran, en onglets, chaque onglet tenant sur l'écran sans défilement.
+ * Général : identité, prix (normal, tarifs 1 et 2, prix formule), éco-participations, prix libre, TVA, type de bien,
+ * hors CA. Avancé : envoi en préparation, commentaires et suppléments, activation. Apparence : image.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -371,6 +437,7 @@ internal fun ProductDialog(
     groups: List<fr.foodsafe.pos.app.data.ModifierGroup> = emptyList(),
     initialGroups: List<String> = emptyList(),
     onSaveGroups: (List<String>) -> Unit = {},
+    subCategories: List<String> = emptyList(),
 ) {
     var tab by remember { mutableStateOf(0) }
     var groupIds by remember { mutableStateOf(initialGroups) }
@@ -395,109 +462,106 @@ internal fun ProductDialog(
     var active by remember { mutableStateOf(initial.active) }
     fun opt(v: String) = if (v.isBlank()) null else parsePrice(v)
     val cents = if (openPrice && price.isBlank()) Cents.ZERO else parsePrice(price)
-    val amounts = listOf(price1, price2, formulaPrice, deee, dea)
-    val amountsOk = amounts.all { it.isBlank() || parsePrice(it) != null }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "Nouveau produit" else "Produit ${initial.label.uppercase()}") },
-        text = {
-            Column(Modifier.width(860.dp).heightIn(max = 600.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Général", "Avancé", "Apparence").forEachIndexed { i, t -> Chip(t, tab == i) { tab = i } }
+    val amountsOk = listOf(price1, price2, formulaPrice, deee, dea).all { it.isBlank() || parsePrice(it) != null }
+    val canSave = label.isNotBlank() && cents != null && amountsOk
+    val save = {
+        if (groupIds != initialGroups) onSaveGroups(groupIds)
+        onSave(initial.copy(
+            label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null },
+            defaultLevel = level, destination = dest, active = active, imageId = imageId,
+            internalCode = code.trim().ifBlank { null }, description = description.trim().ifBlank { null },
+            price1 = opt(price1), price2 = opt(price2), formulaPrice = opt(formulaPrice),
+            ecoDeee = opt(deee) ?: Cents.ZERO, ecoDea = opt(dea) ?: Cents.ZERO,
+            openPrice = openPrice, goodsType = goods, outOfTurnover = outOfTurnover,
+        ))
+    }
+    androidx.compose.ui.window.Dialog(onDismiss, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Column(Modifier.fillMaxSize().padding(8.dp).clip(RoundedCornerShape(12.dp)).background(Color.White)) {
+            // En-tête : retour, nom du produit, enregistrer
+            Row(Modifier.fillMaxWidth().background(Color(0xFFEDEFF3)).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                PadKey("← Retour", Modifier.size(130.dp, 48.dp), color = NavySoft, textColor = Color.White, fontSize = 16.sp, onClick = onDismiss)
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (isNew) "NOUVEAU PRODUIT" else "PRODUIT", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Muted)
+                    Text(label.uppercase().ifBlank { "—" }, fontSize = 20.sp, fontWeight = FontWeight.Black, color = Navy, maxLines = 1)
                 }
-                HorizontalDivider()
-                Column(Modifier.weight(1f, fill = false).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    when (tab) {
-                        0 -> {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(category, { category = it.take(30) }, Modifier.weight(1f), label = { Text("Catégorie") }, singleLine = true)
-                                OutlinedTextField(sub, { sub = it.take(30) }, Modifier.weight(1f), label = { Text("Sous-catégorie (facultatif)") }, singleLine = true)
-                            }
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                categories.forEach { c -> Chip(c, c == category) { category = c } }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(label, { label = it.take(40) }, Modifier.weight(1f), label = { Text("Nom") }, singleLine = true)
-                                OutlinedTextField(code, { code = it.take(20) }, Modifier.weight(1f), label = { Text("Code interne") }, singleLine = true)
-                            }
-                            OutlinedTextField(description, { description = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Description / information") })
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                AmountField("Prix de vente TTC normal (€)", price, { price = it }, Modifier.weight(1.6f), steps = true)
-                                AmountField("Prix 1", price1, { price1 = it }, Modifier.weight(0.7f))
-                                AmountField("Prix 2", price2, { price2 = it }, Modifier.weight(0.7f))
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                AmountField("Prix formule ou composition", formulaPrice, { formulaPrice = it }, Modifier.weight(1.6f), steps = true)
-                                AmountField("Dont éco-part DEEE", deee, { deee = it }, Modifier.weight(0.7f))
-                                AmountField("Dont éco-part DEA", dea, { dea = it }, Modifier.weight(0.7f))
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("Prix libre", Modifier.width(110.dp), color = Navy, fontWeight = FontWeight.SemiBold)
-                                Chip("Oui", openPrice) { openPrice = true }
-                                Chip("Non", !openPrice) { openPrice = false }
-                                if (openPrice) Text("Le prix est demandé au pavé à chaque vente.", fontSize = 12.sp, color = Muted)
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("TVA", Modifier.width(110.dp), color = Navy, fontWeight = FontWeight.SemiBold)
-                                (listOf(fr.foodsafe.pos.core.money.BasisPoints(0)) + VatChoices).forEach { r -> Chip(r.format(), r == vat) { vat = r } }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("Type de bien", Modifier.width(110.dp), color = Navy, fontWeight = FontWeight.SemiBold)
-                                fr.foodsafe.pos.app.data.GoodsType.entries.forEach { g -> Chip(g.label, g == goods) { goods = g } }
-                                Spacer(Modifier.width(16.dp))
-                                Text("Hors CA", color = Navy, fontWeight = FontWeight.SemiBold)
-                                androidx.compose.material3.Switch(outOfTurnover, { outOfTurnover = it })
-                            }
-                            if (outOfTurnover) Text("Hors CA est enregistré sur la fiche ; son effet sur les totaux et la clôture n'est pas encore appliqué.", fontSize = 12.sp, color = Warn)
-                            if (!isNew && cents != null && (cents != initial.price || vat != initial.vat)) {
-                                Text("Le nouveau prix ou la nouvelle TVA vaudront pour les ventes suivantes. Les tickets déjà émis ne changent pas.", fontSize = 12.sp, color = Warn)
+                PadKey("Enregistrer", Modifier.size(160.dp, 48.dp), color = PayCash, textColor = Color.White, fontSize = 16.sp, enabled = canSave, onClick = save)
+            }
+            // Onglets
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                listOf("Général", "Avancé", "Apparence").forEachIndexed { i, t ->
+                    Box(Modifier.background(if (tab == i) FsBlue else Color.Transparent).clickable { tab = i }.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                        Text(t.uppercase(), color = if (tab == i) Color.White else Navy, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+            HorizontalDivider()
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (tab) {
+                    0 -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SheetRow("Catégorie", Modifier.weight(1f)) { SheetDropdown(category, categories, { category = it.take(30) }, Modifier.weight(1f)) }
+                            SheetRow("Sous-catégorie", Modifier.weight(1f)) { SheetDropdown(sub, subCategories, { sub = it.take(30) }, Modifier.weight(1f), placeholder = "facultatif") }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SheetRow("Nom", Modifier.weight(1f)) { SheetField(label, { label = it.take(40) }, Modifier.weight(1f), tag = "fiche-nom") }
+                            SheetRow("Code interne", Modifier.weight(1f)) { SheetField(code, { code = it.take(20) }, Modifier.weight(1f)) }
+                        }
+                        SheetRow("Description") { SheetField(description, { description = it.take(200) }, Modifier.weight(1f)) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SheetRow("Prix de vente TTC normal", Modifier.weight(1f)) { SheetAmount(price, { price = it }, Modifier.weight(1f), steps = true, tag = "fiche-prix") }
+                            SheetRow("Prix 1", Modifier.weight(0.6f)) { SheetAmount(price1, { price1 = it }, Modifier.weight(1f)) }
+                            SheetRow("Prix 2", Modifier.weight(0.6f)) { SheetAmount(price2, { price2 = it }, Modifier.weight(1f)) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SheetRow("Prix formule ou composition", Modifier.weight(1f)) { SheetAmount(formulaPrice, { formulaPrice = it }, Modifier.weight(1f), steps = true) }
+                            SheetRow("Dont éco-part DEEE", Modifier.weight(0.6f)) { SheetAmount(deee, { deee = it }, Modifier.weight(1f)) }
+                            SheetRow("Dont éco-part DEA", Modifier.weight(0.6f)) { SheetAmount(dea, { dea = it }, Modifier.weight(1f)) }
+                        }
+                        SheetRow("Prix libre") {
+                            Chip("Oui", openPrice) { openPrice = true }
+                            Chip("Non", !openPrice) { openPrice = false }
+                            Text("Oui : le prix est demandé au pavé à chaque vente.", fontSize = 12.sp, color = Muted)
+                        }
+                        SheetRow("TVA") {
+                            (listOf(fr.foodsafe.pos.core.money.BasisPoints(0)) + VatChoices).forEach { r -> Chip(r.format(), r == vat) { vat = r } }
+                        }
+                        SheetRow("Type de bien") {
+                            fr.foodsafe.pos.app.data.GoodsType.entries.forEach { g -> Chip(g.label, g == goods) { goods = g } }
+                            Spacer(Modifier.width(24.dp))
+                            Text("HORS CA", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Navy)
+                            androidx.compose.material3.Switch(outOfTurnover, { outOfTurnover = it })
+                        }
+                        if (outOfTurnover) Text("Hors CA est enregistré sur la fiche ; son effet sur les totaux et la clôture n'est pas encore appliqué.", fontSize = 12.sp, color = Warn)
+                        if (!isNew && cents != null && (cents != initial.price || vat != initial.vat)) {
+                            Text("Le nouveau prix ou la nouvelle TVA vaudront pour les ventes suivantes. Les tickets déjà émis ne changent pas.", fontSize = 12.sp, color = Warn)
+                        }
+                    }
+                    1 -> {
+                        SheetRow("Envoi en préparation") {
+                            listOf("CUISINE", "BAR").forEach { d -> Chip(d.lowercase().replaceFirstChar { it.uppercase() }, d == dest) { dest = d } }
+                        }
+                        SheetRow("Niveau par défaut") { (0..3).map(::ServiceLevel).forEach { l -> Chip(l.label, l == level) { level = l } } }
+                        SheetRow("Commentaires et suppléments") {
+                            if (groups.isEmpty()) Text("Aucune liste (menu Produits et claviers → Commentaires et suppléments).", color = Muted, fontSize = 13.sp)
+                            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                groups.forEach { g -> Chip(g.name + if (g.mandatory) " *" else "", g.id in groupIds) { groupIds = if (g.id in groupIds) groupIds - g.id else groupIds + g.id } }
                             }
                         }
-                        1 -> {
-                            Text("Envoi en préparation", fontSize = 13.sp, color = Muted)
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf("CUISINE", "BAR").forEach { d -> Chip(d.lowercase().replaceFirstChar { it.uppercase() }, d == dest) { dest = d } }
-                                Spacer(Modifier.width(12.dp))
-                                (0..3).map(::ServiceLevel).forEach { l -> Chip(l.label, l == level) { level = l } }
-                            }
-                            if (groups.isNotEmpty()) {
-                                Text("Commentaires et suppléments proposés à la vente", fontSize = 13.sp, color = Muted)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    groups.forEach { g -> Chip(g.name + if (g.mandatory) " *" else "", g.id in groupIds) { groupIds = if (g.id in groupIds) groupIds - g.id else groupIds + g.id } }
-                                }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Chip("Actif", active) { active = true }
-                                Chip("Inactif (retiré de la vente)", !active) { active = false }
-                            }
+                        SheetRow("En vente") {
+                            Chip("Oui", active) { active = true }
+                            Chip("Non (retiré de la vente)", !active) { active = false }
                         }
-                        else -> {
-                            Text("Image du bouton", fontSize = 13.sp, color = Muted)
+                    }
+                    else -> {
+                        SheetRow("Image du bouton") {
                             if (images.isEmpty()) Text("Aucune image importée (menu Produits et claviers → Images).", color = Muted)
-                            else ImagePicker(images, imageId) { imageId = it }
+                            else Box(Modifier.weight(1f)) { ImagePicker(images, imageId) { imageId = it } }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (groupIds != initialGroups) onSaveGroups(groupIds)
-                    onSave(initial.copy(
-                        label = label.trim(), price = cents!!, vat = vat, category = category.trim().ifBlank { "Divers" }, subCategory = sub.trim().ifBlank { null },
-                        defaultLevel = level, destination = dest, active = active, imageId = imageId,
-                        internalCode = code.trim().ifBlank { null }, description = description.trim().ifBlank { null },
-                        price1 = opt(price1), price2 = opt(price2), formulaPrice = opt(formulaPrice),
-                        ecoDeee = opt(deee) ?: Cents.ZERO, ecoDea = opt(dea) ?: Cents.ZERO,
-                        openPrice = openPrice, goodsType = goods, outOfTurnover = outOfTurnover,
-                    ))
-                },
-                enabled = label.isNotBlank() && cents != null && amountsOk,
-            ) { Text("Enregistrer") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
-    )
+        }
+    }
 }
 
 internal fun fr.foodsafe.pos.app.data.CatalogState.imageFiles(): Map<String, java.io.File> =

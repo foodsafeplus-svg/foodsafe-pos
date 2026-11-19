@@ -163,9 +163,10 @@ class OrderScreenUiTest {
         waitText("Salade César") // catalogue chargé
         val avant = productCount()
         rule.onNodeWithText("+ Nouveau produit").performClick()
-        waitText("Nouveau produit")
-        rule.onNode(hasSetTextAction() and hasText("Nom")).performTextInput("Sirop menthe")
-        rule.onNode(hasSetTextAction() and hasText("Prix de vente TTC normal (€)")).performTextInput("2,50")
+        waitText("NOUVEAU PRODUIT")
+        rule.onNodeWithTag("fiche-nom").performTextInput("Sirop menthe")
+        rule.onNodeWithTag("fiche-prix").performTextInput("2,50")
+        capture("18-fiche-produit")
         rule.onNodeWithText("Enregistrer").performClick()
         waitText("TOUS LES PRODUITS (${avant + 1})")
         waitText("Sirop menthe")
@@ -316,8 +317,8 @@ class OrderScreenUiTest {
         // modifier le prix depuis l'appui long
         rule.onNodeWithText("Burrata").performTouchInput { longClick() }
         rule.onNodeWithText("Modifier le produit").performClick()
-        waitText("Prix de vente TTC normal (€)")
-        rule.onNode(hasSetTextAction() and hasText("Prix de vente TTC normal (€)")).performTextReplacement("11,50")
+        waitText("PRIX DE VENTE TTC NORMAL")
+        rule.onNodeWithTag("fiche-prix").performTextReplacement("11,50")
         rule.onNodeWithText("Enregistrer").performClick()
         waitText("11,50")
         rule.onNodeWithText("Burrata").performClick()

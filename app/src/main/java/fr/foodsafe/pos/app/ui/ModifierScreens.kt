@@ -59,7 +59,7 @@ internal fun ModifierDialog(title: String, groups: List<ModifierGroup>, onDismis
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(Modifier.width(620.dp).heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.width(560.dp).heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 groups.forEach { g ->
                     Text(g.name + (if (g.mandatory) " · obligatoire" else "") + (if (g.multiple) " · plusieurs choix" else " · un choix"),
                         fontWeight = FontWeight.Bold, color = if (g in missing) Warn else Navy, fontSize = 15.sp)

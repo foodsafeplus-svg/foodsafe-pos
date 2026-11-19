@@ -7,6 +7,12 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.graphics.asAndroidBitmap
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,6 +58,16 @@ class ScreenSizesUiTest {
         rule.onNodeWithText("Salade César").performClick()
         waitText("NET À PAYER : 9,50 €")
         capture("$name-vente")
+        // fiche produit par appui long : tout l'onglet Général doit tenir à l'écran
+        rule.onNodeWithText("Burrata").performTouchInput { longClick() }
+        rule.onNodeWithText("Modifier le produit").performClick()
+        waitText("TYPE DE BIEN")
+        rule.waitForIdle()
+        val dv = org.robolectric.shadows.ShadowDialog.getLatestDialog().window!!.decorView
+        val bmp = Bitmap.createBitmap(dv.width, dv.height, Bitmap.Config.ARGB_8888)
+        rule.runOnUiThread { dv.draw(android.graphics.Canvas(bmp)) }
+        System.getProperty("screenshotDir")?.let { File(it, "$name-fiche.png").outputStream().use { o -> bmp.compress(Bitmap.CompressFormat.PNG, 100, o) } }
+        rule.onNodeWithText("TYPE DE BIEN").assertIsDisplayed()
     }
 
     @Config(qualifiers = "w1006dp-h601dp-land-tvdpi") @Test fun ecranCaisseAlex() = parcours("15-ecran-1340x800", "71")

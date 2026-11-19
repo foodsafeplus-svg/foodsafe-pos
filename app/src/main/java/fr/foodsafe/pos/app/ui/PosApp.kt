@@ -609,7 +609,8 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
         ProductDialog(p, catalog?.categories.orEmpty(), isNew = false,
             onSave = { vm.saveProduct(it); editing = null }, onDismiss = { editing = null }, images = catalog?.images.orEmpty(),
             groups = catalog?.groups.orEmpty(), initialGroups = catalog?.productGroups?.get(p.id).orEmpty(),
-            onSaveGroups = { vm.setProductGroups(p.id, it) })
+            onSaveGroups = { vm.setProductGroups(p.id, it) },
+            subCategories = catalog?.products.orEmpty().mapNotNull { it.subCategory }.distinct().sorted())
     }
     askingFormula?.let { f ->
         FormulaDialog(f, catalog?.products.orEmpty(), onDismiss = { askingFormula = null }) { vm.addFormula(f, it); askingFormula = null }

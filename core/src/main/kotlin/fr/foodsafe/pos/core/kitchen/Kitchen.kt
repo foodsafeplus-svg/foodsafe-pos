@@ -15,7 +15,8 @@ enum class KitchenTicketKind {
     TABLE_MOVE,
 }
 
-data class KitchenItem(val quantityMilli: Long, val label: String, val level: ServiceLevel)
+/** [modifier] : commentaire ou supplément imprimé en retrait sous son produit. */
+data class KitchenItem(val quantityMilli: Long, val label: String, val level: ServiceLevel, val modifier: Boolean = false)
 
 data class KitchenTicket(
     val dispatchId: String,

@@ -77,6 +77,9 @@ enum class SensitiveAction(val label: String) {
     REPRINT_DUPLICATE("Réimprimer un ticket (duplicata)"),
     Z_CLOSURE("Clôture Z"),
     REFUND("Remboursement"),
+    OPEN_DRAWER("Ouvrir le tiroir sans vente"),
+    EDIT_CATALOG("Modifier les produits et claviers"),
+    REMOVE_PROMO("Retirer une promotion"),
 }
 
 sealed interface Policy {
@@ -124,6 +127,9 @@ class PermissionPolicy(private val rules: Map<Pair<Role, SensitiveAction>, Polic
                 (Role.SERVER to SensitiveAction.Z_CLOSURE) to Policy.Forbidden,
                 (Role.SERVER to SensitiveAction.REFUND) to Policy.Forbidden,
                 (Role.MANAGER to SensitiveAction.REFUND) to Policy.AlwaysValidate,
+                (Role.SERVER to SensitiveAction.OPEN_DRAWER) to Policy.ManagerPin,
+                (Role.SERVER to SensitiveAction.EDIT_CATALOG) to Policy.Forbidden,
+                (Role.SERVER to SensitiveAction.REMOVE_PROMO) to Policy.ManagerPin,
             ),
         )
     }

@@ -29,6 +29,9 @@ import fr.foodsafe.pos.core.kitchen.KitchenTicketRenderer
 import fr.foodsafe.pos.core.money.Cents
 import fr.foodsafe.pos.core.order.Order
 import fr.foodsafe.pos.core.order.OrderLine
+import fr.foodsafe.pos.core.order.FormulaComposer
+import fr.foodsafe.pos.core.order.FormulaPick
+import fr.foodsafe.pos.core.order.PromoEngine
 import fr.foodsafe.pos.core.order.OrderPricer
 import fr.foodsafe.pos.core.order.OrderStatus
 import fr.foodsafe.pos.core.order.SaleMode
@@ -62,6 +65,7 @@ class PosRepository(
     private val clock: () -> Long = System::currentTimeMillis,
     private val ids: IdGenerator = IdGenerator { UUID.randomUUID().toString() },
     private val policy: PermissionPolicy = PermissionPolicy.DEFAULT,
+    private val imagesDir: java.io.File? = null,
 ) {
     private val dao = db.dao()
     private val authenticator = PinAuthenticator()
@@ -81,6 +85,14 @@ class PosRepository(
 
     private val ledger = FiscalLedger(fiscalStore, keys.signer, establishment, terminalId)
 
+    /** Catalogue éditable (produits, claviers) : réservé aux responsables, chaque modification est journalisée. */
+    val catalog = CatalogRepository(
+        db, ids::next, clock,
+        log = { a, t, e, i, b, af -> log(a, t, e, i, b, af) },
+        requireRight = { actor -> authorize(actor, SensitiveAction.EDIT_CATALOG, 0, null) },
+        imagesDir = imagesDir,
+    )
+
     /**
      * À appeler une fois au démarrage, hors du thread UI : enregistre la clé publique du terminal
      * et crée l'équipe de démonstration si la base est vide.
@@ -88,6 +100,9 @@ class PosRepository(
     fun bootstrap() = db.runInTransaction {
         dao.insertKey(FiscalKeyEntity(keys.signer.keyId, B64.encode(keys.publicKey.encoded), clock()))
         seedDemoEmployees()
+        catalog.seedIfEmpty()
+        catalog.seedModifiersIfEmpty()
+        catalog.seedFormulasIfEmpty()
     }
 
     val tickets get() = dao.observeTickets()
@@ -166,21 +181,79 @@ class PosRepository(
             OrderSnapshot(order, emptyList())
         }
 
-    fun addProduct(orderId: String, actorId: String, product: Product, level: ServiceLevel?, key: String) =
+    /** Ajoute un produit et, le cas échéant, ses commentaires et suppléments choisis (sous-lignes). */
+    fun addProduct(orderId: String, actorId: String, product: Product, level: ServiceLevel?, key: String, modifiers: List<ModifierItem> = emptyList()) =
         mutate(orderId, actorId, key, "ORDER_LINE_ADDED") { order ->
             val line = OrderLine(
                 id = ids.next(), productId = product.id, label = product.label, unitPriceTtc = product.price,
                 quantityMilli = 1000, vatRate = product.vat, level = level ?: product.defaultLevel,
                 destination = product.destination, authorEmployeeId = actorId, createdAt = clock(),
             )
-            DispatchResult(order.copy(lines = order.lines + line).bumped(), emptyList())
+            DispatchResult(withPromos(order.copy(lines = order.lines + line + modifiers.map { modifierLine(line, it, actorId) }).bumped()), emptyList())
         }
 
+    /**
+     * Formule (menu ou package) : [picks] = un produit par étape, dans l'ordre des étapes.
+     * Le niveau d'envoi de chaque article est celui de son étape, sinon celui du produit.
+     */
+    fun addFormula(orderId: String, actorId: String, formula: Formula, picks: List<Product>, key: String) =
+        mutate(orderId, actorId, key, "ORDER_LINE_ADDED") { order ->
+            require(formula.kind != FormulaKind.PROMO) { "une promo s'applique seule" }
+            require(picks.size == formula.steps.size) { "un choix par étape" }
+            formula.steps.zip(picks).forEach { (s, p) -> require(p.id in s.productIds) { "${p.label} n'est pas proposé à l'étape ${s.name}" } }
+            val lines = FormulaComposer.lines(
+                formula.id, formula.name, formula.price,
+                formula.steps.zip(picks).map { (s, p) -> FormulaPick(p.id, p.label, p.formulaPrice ?: p.price, p.vat, s.level ?: p.defaultLevel, p.destination) },
+                ids, actorId, clock(),
+            )
+            DispatchResult(order.copy(lines = order.lines + lines).bumped(), emptyList())
+        }
+
+    /** Promotions automatiques recalculées après chaque ajout ou annulation. */
+    private fun withPromos(order: Order): Order = PromoEngine.apply(order, catalog.promoRules(), ids)
+
+    /** Retrait d'une promotion par l'équipe : droit vérifié (responsable par défaut), motif au journal ; elle n'est plus reproposée sur ces articles. */
+    fun removePromo(orderId: String, actorId: String, lineId: String, reason: String, key: String, approverId: String? = null): OrderSnapshot {
+        require(reason.isNotBlank()) { "motif obligatoire" }
+        val approval = authorize(actorId, SensitiveAction.REMOVE_PROMO, 0, approverId)
+        return mutate(orderId, actorId, key, "PROMO_REMOVED", listOfNotNull(reason.trim(), approval).joinToString(" · ")) { order ->
+            val group = order.lines.firstOrNull { it.id == lineId }?.promoGroup?.takeIf { it != PromoEngine.REFUSED } ?: error("pas de promotion sur cette ligne")
+            DispatchResult(PromoEngine.remove(order, group, refuse = true), emptyList())
+        }
+    }
+
+    /** Commentaires ou suppléments ajoutés après coup à une ligne pas encore envoyée. */
+    fun addModifiers(orderId: String, actorId: String, parentLineId: String, modifiers: List<ModifierItem>, key: String) =
+        mutate(orderId, actorId, key, "ORDER_LINE_ADDED") { order ->
+            val parent = order.lines.firstOrNull { it.id == parentLineId && it.isActive } ?: error("ligne introuvable")
+            require(!parent.isModifier) { "choisissez la ligne du produit" }
+            check(!parent.isSent) { "ligne déjà envoyée en cuisine : ajoutez plutôt un nouvel article" }
+            val at = order.lines.indexOfLast { it.id == parentLineId || it.parentLineId == parentLineId } + 1
+            val lines = order.lines.toMutableList().apply { addAll(at, modifiers.map { modifierLine(parent, it, actorId) }) }
+            DispatchResult(order.copy(lines = lines).bumped(), emptyList())
+        }
+
+    private fun modifierLine(parent: OrderLine, m: ModifierItem, actorId: String) = OrderLine(
+        id = ids.next(), productId = m.id, label = m.label, unitPriceTtc = m.price, quantityMilli = parent.quantityMilli,
+        vatRate = m.vat ?: parent.vatRate, level = parent.level, destination = parent.destination,
+        authorEmployeeId = actorId, createdAt = clock(), parentLineId = parent.id,
+    )
+
+    /** Un produit dont un groupe obligatoire (ex. Cuisson) n'a pas de choix ne part pas en cuisine. */
+    private fun checkMandatory(order: Order) {
+        val missing = order.activeLines.filter { !it.isSent && !it.isModifier }.flatMap { line ->
+            val chosen = order.activeLines.filter { it.parentLineId == line.id }.map { it.productId }
+            catalog.missingMandatory(line.productId, chosen).map { "$it (${line.label})" }
+        }
+        check(missing.isEmpty()) { "Choix obligatoire manquant : " + missing.joinToString(", ") }
+    }
+
     fun sendToKitchen(orderId: String, actorId: String, key: String) =
-        mutate(orderId, actorId, key, "KITCHEN_SENT") { KitchenDispatcher.send(it, ids) }
+        mutate(orderId, actorId, key, "KITCHEN_SENT") { checkMandatory(it); KitchenDispatcher.send(it, ids) }
 
     fun claimNext(orderId: String, actorId: String, key: String) =
         mutate(orderId, actorId, key, "LEVEL_CLAIMED") { order ->
+            checkMandatory(order)
             val level = KitchenDispatcher.nextClaimableLevel(order) ?: error("rien à réclamer")
             KitchenDispatcher.claim(order, level, ids)
         }
@@ -198,7 +271,10 @@ class PosRepository(
         val approval = if (sent) authorize(actorId, SensitiveAction.CANCEL_SENT_LINE, 0, approverId) else null
         return mutate(orderId, actorId, key, "LINE_CANCELLED", listOfNotNull(reason, approval).joinToString(" · ")) { order ->
             val line = order.lines.first { it.id == lineId }
-            KitchenDispatcher.cancelLine(order, lineId, line.quantityMilli, reason, actorId, clock(), ids)
+            val r = KitchenDispatcher.cancelLine(order, lineId, line.quantityMilli, reason, actorId, clock(), ids)
+            // l'article annulé libère sa promo : les autres articles reviennent au détail, puis on recherche une combinaison
+            val group = line.promoGroup?.takeIf { it != PromoEngine.REFUSED }
+            if (group == null) r else r.copy(order = withPromos(PromoEngine.remove(r.order, group, refuse = false)))
         }
     }
 
@@ -257,6 +333,18 @@ class PosRepository(
             ledger.issueDuplicate(ids.next(), ticketId, actorId, clock())
                 .also { log(actorId, "DUPLICATE_ISSUED", "fiscal", it.id, null, it.numberLabel, approval) }
         }
+    }
+
+    /** Ouverture du tiroir sans vente : droit vérifié et inscrite au journal AVANT l'impulsion. */
+    fun openDrawer(actorId: String, approverId: String? = null) {
+        val approval = authorize(actorId, SensitiveAction.OPEN_DRAWER, 0, approverId)
+        db.runInTransaction { log(actorId, "DRAWER_OPENED", "drawer", terminalId, null, null, approval) }
+    }
+
+    /** Comptage des espèces (compteur) : non fiscal, mais tracé (total + détail). */
+    fun logCashCount(actorId: String, count: fr.foodsafe.pos.core.cash.CashCount) = db.runInTransaction {
+        val detail = count.lines.joinToString(";") { "${it.denomination.value}x${it.quantity}" }
+        log(actorId, "CASH_COUNTED", "drawer", terminalId, null, "total=${count.total.value};$detail")
     }
 
     fun reportX(actorId: String): ClosureReport = db.runInTransaction<ClosureReport> {

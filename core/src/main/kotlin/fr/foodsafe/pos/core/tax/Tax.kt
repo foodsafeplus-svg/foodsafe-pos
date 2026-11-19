@@ -32,6 +32,7 @@ object TaxCalculator {
 
     fun breakdown(amounts: List<Pair<BasisPoints, Cents>>): TaxBreakdown {
         val lines = amounts
+            .filter { !it.second.isZero } // une sous-ligne gratuite n'ouvre pas de taux à 0,00
             .groupBy({ it.first.value }, { it.second.value })
             .toSortedMap()
             .map { (rate, ttcs) ->

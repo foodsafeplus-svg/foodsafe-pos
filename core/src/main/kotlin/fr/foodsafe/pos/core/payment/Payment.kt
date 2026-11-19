@@ -7,6 +7,9 @@ enum class PaymentMethod(val label: String, val isCash: Boolean) {
     CARD("Carte (TPE)", false),
     MEAL_VOUCHER("Titre-restaurant", false),
     CREDIT_NOTE("Avoir", false),
+    // Ajoutés en fin d'énumération : l'ordre sert au tri des Z déjà émis, il ne doit pas changer.
+    CHEQUE("Chèque", false),
+    HOLIDAY_VOUCHER("Chèque-vacances", false),
 }
 
 /** Événement de paiement : immuable, distinct du mouvement de fonds et du document fiscal. */

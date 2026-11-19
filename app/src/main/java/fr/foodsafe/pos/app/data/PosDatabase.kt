@@ -13,14 +13,22 @@ import fr.foodsafe.pos.core.journal.JournalSchema
         OrderEntity::class, OrderLineEntity::class, KitchenTicketEntity::class,
         ProcessedOperationEntity::class, PaymentEntity::class, JournalEventEntity::class,
         EmployeeEntity::class, FiscalDocumentEntity::class, FiscalKeyEntity::class,
+        ProductEntity::class, KeyboardEntity::class, KeyboardPageEntity::class, KeyboardCellEntity::class, ImageEntity::class,
+        ModifierGroupEntity::class, ModifierItemEntity::class, ProductModifierGroupEntity::class,
+        FormulaEntity::class, FormulaStepEntity::class,
     ],
-    version = 2,
+    version = 6,
     exportSchema = true,
     // v1 (incrément 1) → v2 : ajout des tables employés, documents fiscaux et clés. Aucune donnée existante modifiée.
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    // v2 → v3 : catalogue éditable (produits, claviers, pages, cases, images). Nouvelles tables uniquement.
+    // v3 → v4 : commentaires et suppléments (nouvelles tables) + colonne nullable order_lines.parentLineId.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
+    // v5 → v6 : tarif bloqué sur une touche (colonne nullable keyboard_cells.tariff).
+    // v4 → v5 : formules (nouvelles tables) + colonnes nullables order_lines.role et promoGroup.
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
+    abstract fun catalogDao(): CatalogDao
 
     companion object {
         /** Triggers d'inaltérabilité, réinstallés (IF NOT EXISTS) à chaque ouverture. */

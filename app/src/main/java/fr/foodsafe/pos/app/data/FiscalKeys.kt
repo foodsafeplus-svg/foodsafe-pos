@@ -59,6 +59,48 @@ class AndroidKeystoreKeyProvider(terminalId: String) : FiscalKeyProvider {
     }
 }
 
+/**
+ * Clé ECDSA P-256 logicielle, conservée dans le stockage privé de l'application. Repli UNIQUEMENT quand
+ * l'Android Keystore du terminal est défaillant (constaté sur un Rockchip ECR-200 / Android 11 :
+ * KeyStoreException « Unknown error » à la génération). Protection moindre que le Keystore (clé lisible
+ * par un appareil rooté) : l'identifiant de clé porte le suffixe « SW » pour que ce soit visible au journal.
+ */
+class FileKeyProvider(terminalId: String, dir: java.io.File) : FiscalKeyProvider {
+    private val file = java.io.File(dir, "fiscal-key-$terminalId.p8")
+    private val pair: java.security.KeyPair = load() ?: EcdsaSigner.generateKeyPair().also { save(it) }
+    override val publicKey: PublicKey = pair.public
+    override val signer = EcdsaSigner("$terminalId-SW-" + fingerprint(pair.public), pair.private)
+
+    private fun load(): java.security.KeyPair? = runCatching {
+        val (priv, pub) = file.readLines().map { B64.decode(it) }
+        val kf = java.security.KeyFactory.getInstance("EC")
+        java.security.KeyPair(
+            kf.generatePublic(java.security.spec.X509EncodedKeySpec(pub)),
+            kf.generatePrivate(java.security.spec.PKCS8EncodedKeySpec(priv)),
+        )
+    }.getOrNull()
+
+    private fun save(p: java.security.KeyPair) {
+        val tmp = java.io.File(file.path + ".tmp")
+        tmp.writeText(B64.encode(p.private.encoded) + "\n" + B64.encode(p.public.encoded) + "\n")
+        check(tmp.renameTo(file)) { "Impossible d'enregistrer la clé fiscale" }
+    }
+}
+
+/** Keystore d'abord ; si le terminal ne sait pas générer la clé, repli sur la clé logicielle persistante. */
+fun fiscalKeyProvider(terminalId: String, dir: java.io.File): FiscalKeyProvider {
+    val sw = java.io.File(dir, "fiscal-key-$terminalId.p8")
+    if (sw.exists()) return FileKeyProvider(terminalId, dir) // ne jamais rebasculer : une seule clé active
+    return try {
+        AndroidKeystoreKeyProvider(terminalId).also { it.signer.sign(byteArrayOf(0)) }
+    } catch (e: Exception) {
+        runCatching {
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry("foodsafe-fiscal-$terminalId")
+        }
+        FileKeyProvider(terminalId, dir)
+    }
+}
+
 /** Clé logicielle : UNIQUEMENT pour les tests (Robolectric ne fournit pas d'Android Keystore). */
 class SoftwareKeyProvider(terminalId: String) : FiscalKeyProvider {
     private val pair = EcdsaSigner.generateKeyPair()

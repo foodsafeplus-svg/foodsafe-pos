@@ -1,0 +1,65 @@
+package fr.foodsafe.pos.app.data
+
+import androidx.room.Dao
+import androidx.room.Delete
+import androidx.room.Query
+import androidx.room.Upsert
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface CatalogDao {
+    @Query("SELECT * FROM products ORDER BY category, label") fun observeProducts(): Flow<List<ProductEntity>>
+    @Query("SELECT * FROM products") fun products(): List<ProductEntity>
+    @Query("SELECT * FROM products WHERE id = :id") fun product(id: String): ProductEntity?
+    @Query("SELECT COUNT(*) FROM products") fun productCount(): Int
+    @Upsert fun upsertProduct(p: ProductEntity)
+
+    @Query("SELECT * FROM keyboards ORDER BY position") fun observeKeyboards(): Flow<List<KeyboardEntity>>
+    @Query("SELECT * FROM keyboards ORDER BY position") fun keyboards(): List<KeyboardEntity>
+    @Upsert fun upsertKeyboard(k: KeyboardEntity)
+
+    @Query("SELECT * FROM keyboard_pages ORDER BY keyboardId, position") fun observePages(): Flow<List<KeyboardPageEntity>>
+    @Query("SELECT * FROM keyboard_pages WHERE keyboardId = :keyboardId ORDER BY position") fun pages(keyboardId: String): List<KeyboardPageEntity>
+    @Query("SELECT * FROM keyboard_pages WHERE id = :id") fun page(id: String): KeyboardPageEntity?
+    @Upsert fun upsertPage(p: KeyboardPageEntity)
+    @Upsert fun upsertPages(p: List<KeyboardPageEntity>)
+    @Query("DELETE FROM keyboard_pages WHERE id = :id") fun deletePage(id: String)
+
+    @Query("SELECT * FROM keyboard_cells") fun observeCells(): Flow<List<KeyboardCellEntity>>
+    @Upsert fun upsertCell(c: KeyboardCellEntity)
+    @Query("SELECT * FROM keyboard_cells WHERE pageId = :pageId AND slot = :slot") fun cell(pageId: String, slot: Int): KeyboardCellEntity?
+    @Upsert fun upsertCells(c: List<KeyboardCellEntity>)
+    @Query("DELETE FROM keyboard_cells WHERE pageId = :pageId AND slot = :slot") fun deleteCell(pageId: String, slot: Int)
+    @Query("DELETE FROM keyboard_cells WHERE pageId = :pageId") fun deleteCellsOf(pageId: String)
+    @Query("DELETE FROM keyboard_cells WHERE kind = 'PAGE' AND targetId = :pageId") fun deleteLinksTo(pageId: String)
+
+    @Query("SELECT * FROM images ORDER BY createdAt DESC") fun observeImages(): Flow<List<ImageEntity>>
+    @Upsert fun upsertImage(i: ImageEntity)
+    @Query("SELECT * FROM images WHERE id = :id") fun imageById(id: String): ImageEntity?
+    @Delete fun deleteImage(i: ImageEntity)
+
+    @Query("SELECT * FROM modifier_groups WHERE deleted = 0 ORDER BY position") fun observeGroups(): Flow<List<ModifierGroupEntity>>
+    @Query("SELECT * FROM modifier_groups ORDER BY position") fun allGroups(): List<ModifierGroupEntity>
+    @Query("SELECT * FROM modifier_groups WHERE id = :id") fun group(id: String): ModifierGroupEntity?
+    @Upsert fun upsertGroup(g: ModifierGroupEntity)
+    @Query("SELECT * FROM modifier_items ORDER BY groupId, position") fun observeItems(): Flow<List<ModifierItemEntity>>
+    @Query("SELECT * FROM modifier_items WHERE groupId = :groupId ORDER BY position") fun items(groupId: String): List<ModifierItemEntity>
+    @Query("SELECT * FROM modifier_items WHERE id = :id") fun item(id: String): ModifierItemEntity?
+    @Upsert fun upsertItem(i: ModifierItemEntity)
+    @Query("DELETE FROM modifier_items WHERE id = :id") fun deleteItem(id: String)
+    @Query("SELECT * FROM product_modifier_groups ORDER BY productId, position") fun observeProductGroups(): Flow<List<ProductModifierGroupEntity>>
+    @Query("SELECT * FROM product_modifier_groups WHERE productId = :productId ORDER BY position") fun productGroups(productId: String): List<ProductModifierGroupEntity>
+    @Upsert fun upsertProductGroups(l: List<ProductModifierGroupEntity>)
+    @Query("DELETE FROM product_modifier_groups WHERE productId = :productId") fun clearProductGroups(productId: String)
+    @Query("DELETE FROM product_modifier_groups WHERE groupId = :groupId") fun unlinkGroup(groupId: String)
+
+    @Query("SELECT * FROM formulas WHERE deleted = 0 ORDER BY position") fun observeFormulas(): Flow<List<FormulaEntity>>
+    @Query("SELECT * FROM formulas ORDER BY position") fun allFormulas(): List<FormulaEntity>
+    @Query("SELECT * FROM formulas WHERE id = :id") fun formula(id: String): FormulaEntity?
+    @Upsert fun upsertFormula(f: FormulaEntity)
+    @Query("SELECT * FROM formula_steps ORDER BY formulaId, position") fun observeFormulaSteps(): Flow<List<FormulaStepEntity>>
+    @Query("SELECT * FROM formula_steps WHERE formulaId = :formulaId ORDER BY position") fun formulaSteps(formulaId: String): List<FormulaStepEntity>
+    @Upsert fun upsertFormulaSteps(s: List<FormulaStepEntity>)
+    @Query("DELETE FROM formula_steps WHERE formulaId = :formulaId") fun clearFormulaSteps(formulaId: String)
+    @Query("DELETE FROM keyboard_cells WHERE kind = 'FORMULA' AND targetId = :formulaId") fun deleteFormulaCells(formulaId: String)
+}

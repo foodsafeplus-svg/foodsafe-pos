@@ -56,6 +56,8 @@ data class KeyboardCellEntity(
     val kind: String,
     val targetId: String,
     val color: Int?,
+    /** v6 : tarif bloqué sur cette touche (1, 2… ; null = tarif normal). */
+    @androidx.room.ColumnInfo(defaultValue = "NULL") val tariff: Int? = null,
 )
 
 /** Image importée (fichier dans le stockage privé de l'application). */

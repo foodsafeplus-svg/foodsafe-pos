@@ -11,7 +11,10 @@ import org.json.JSONObject
 sealed interface KeyboardCell {
     val slot: Int
     val color: Int?
-    data class ProductCell(override val slot: Int, val product: Product, override val color: Int?) : KeyboardCell
+    data class ProductCell(override val slot: Int, val product: Product, override val color: Int?, val tariff: Int? = null) : KeyboardCell {
+        /** Prix vendu par cette touche (tarif bloqué ou normal). */
+        val price get() = product.priceFor(tariff)
+    }
     data class PageLink(override val slot: Int, val page: KeyboardPage, override val color: Int?) : KeyboardCell
     data class FormulaCell(override val slot: Int, val formula: Formula, override val color: Int?) : KeyboardCell
 }
@@ -105,7 +108,7 @@ class CatalogRepository internal constructor(
         val pageById = pages.associateBy { it.id }
         val cells = c.mapNotNull { e ->
             when (e.kind) {
-                "PRODUCT" -> byId[e.targetId]?.takeIf { it.active }?.let { KeyboardCell.ProductCell(e.slot, it, e.color) }
+                "PRODUCT" -> byId[e.targetId]?.takeIf { it.active }?.let { KeyboardCell.ProductCell(e.slot, it, e.color, e.tariff) }
                 "PAGE" -> pageById[e.targetId]?.let { KeyboardCell.PageLink(e.slot, it, e.color) }
                 "FORMULA" -> formulaById[e.targetId]?.takeIf { it.kind != FormulaKind.PROMO }?.let { KeyboardCell.FormulaCell(e.slot, it, e.color) }
                 else -> null
@@ -400,6 +403,13 @@ class CatalogRepository internal constructor(
         dao.deleteCell(fromPage, fromSlot); dao.deleteCell(toPage, toSlot)
         dao.upsertCell(moving.copy(pageId = toPage, slot = toSlot))
         other?.let { dao.upsertCell(it.copy(pageId = fromPage, slot = fromSlot)) }
+    }
+
+    /** « Fixer tarification » : la touche vend toujours au tarif choisi (null = tarif normal). */
+    fun setCellTariff(actorId: String, pageId: String, slot: Int, tariff: Int?) = edit(actorId, "KEYBOARD_UPDATED", pageId) {
+        val c = dao.cell(pageId, slot) ?: error("touche introuvable")
+        require(c.kind == "PRODUCT") { "seule une touche produit a un tarif" }
+        dao.upsertCell(c.copy(tariff = tariff?.takeIf { it > 0 }))
     }
 
     fun clearCell(actorId: String, pageId: String, slot: Int) = edit(actorId, "KEYBOARD_UPDATED", pageId) { dao.deleteCell(pageId, slot) }

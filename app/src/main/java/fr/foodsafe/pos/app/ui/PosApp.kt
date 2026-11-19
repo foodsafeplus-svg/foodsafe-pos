@@ -72,6 +72,7 @@ import fr.foodsafe.pos.app.data.KitchenTicketEntity
 import fr.foodsafe.pos.app.data.OrderSnapshot
 import fr.foodsafe.pos.app.data.PosRepository
 import fr.foodsafe.pos.app.data.Product
+import fr.foodsafe.pos.app.data.tariffs
 import fr.foodsafe.pos.core.order.PromoEngine
 import fr.foodsafe.pos.core.fiscal.FiscalDocType
 import fr.foodsafe.pos.core.fiscal.FiscalVerification
@@ -601,7 +602,8 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
         KeyMenuDialog(cell, onDismiss = { menuFor = null },
             onEdit = (cell as? KeyboardCell.ProductCell)?.let { pc -> { editing = pc.product; menuFor = null } },
             onMove = { moving = pg to cell; menuFor = null },
-            onFree = { vm.clearCell(pg, cell.slot); menuFor = null })
+            onFree = { vm.clearCell(pg, cell.slot); menuFor = null },
+            onTariff = { t -> vm.setCellTariff(pg, cell.slot, t); menuFor = null })
     }
     editing?.let { p ->
         ProductDialog(p, catalog?.categories.orEmpty(), isNew = false,
@@ -662,10 +664,13 @@ private fun ProductPanel(paid: Boolean, selectedLevel: ServiceLevel?, modifier: 
             if (mv != null) {
                 if (page != null) { vm.moveCell(mv.first, mv.second.slot, page.id, cell.slot); moving = null }
             } else if (!paid) when (cell) {
-                is KeyboardCell.ProductCell -> when {
-                    !catalog?.groupsFor(cell.product.id).isNullOrEmpty() -> asking = cell.product
-                    cell.product.openPrice -> pricing = cell.product to emptyList()
-                    else -> vm.add(cell.product)
+                is KeyboardCell.ProductCell -> {
+                    val sold = cell.product.copy(price = cell.price)
+                    when {
+                        !catalog?.groupsFor(sold.id).isNullOrEmpty() -> asking = sold
+                        sold.openPrice -> pricing = sold to emptyList()
+                        else -> vm.add(sold)
+                    }
                 }
                 is KeyboardCell.PageLink -> vm.openPage(cell.page.id)
                 is KeyboardCell.FormulaCell -> {
@@ -716,7 +721,8 @@ internal fun KeyboardGrid(
                     when (cell) {
                         is KeyboardCell.ProductCell -> {
                             cell.product.imageId?.let(images::get)?.let { f -> ImageThumb(f, Modifier.align(Alignment.TopCenter).size(40.dp)) }
-                            Text(cell.product.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = fg)
+                            Text(cell.price.format(false), Modifier.align(Alignment.TopEnd), fontSize = 12.sp, color = fg)
+                            cell.tariff?.let { t -> Text("T$t", Modifier.align(Alignment.TopStart), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = fg) }
                             Text(cell.product.label, Modifier.align(Alignment.BottomCenter), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = fg, textAlign = TextAlign.Center, maxLines = 2)
                         }
                         is KeyboardCell.FormulaCell -> {
@@ -742,7 +748,8 @@ internal fun KeyboardCell.title() = when (this) {
 }
 
 @Composable
-private fun KeyMenuDialog(cell: KeyboardCell, onDismiss: () -> Unit, onEdit: (() -> Unit)?, onMove: () -> Unit, onFree: () -> Unit) {
+private fun KeyMenuDialog(cell: KeyboardCell, onDismiss: () -> Unit, onEdit: (() -> Unit)?, onMove: () -> Unit, onFree: () -> Unit, onTariff: ((Int?) -> Unit)? = null) {
+    var askTariff by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(cell.title()) },
@@ -751,6 +758,15 @@ private fun KeyMenuDialog(cell: KeyboardCell, onDismiss: () -> Unit, onEdit: (()
                 if (onEdit != null) PadKey("Modifier le produit", Modifier.fillMaxWidth().height(56.dp), color = FsBlue, textColor = Color.White, fontSize = 17.sp, onClick = onEdit)
                 PadKey("Déplacer la touche", Modifier.fillMaxWidth().height(56.dp), color = NavySoft, textColor = Color.White, fontSize = 17.sp, onClick = onMove)
                 PadKey("Libérer l'emplacement", Modifier.fillMaxWidth().height(56.dp), color = Color(0xFF2E9E4F), textColor = Color.White, fontSize = 17.sp, onClick = onFree)
+                if (onTariff != null && cell is KeyboardCell.ProductCell) {
+                    PadKey("Fixer tarification", Modifier.fillMaxWidth().height(56.dp), color = Color(0xFFC62828), textColor = Color.White, fontSize = 17.sp) { askTariff = !askTariff }
+                    if (askTariff) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        cell.product.tariffs.forEach { (t, p) ->
+                            Chip((if (t == 0) "Normal" else "Tarif $t") + " " + p.format(false), (cell.tariff ?: 0) == t) { onTariff(t.takeIf { it > 0 }) }
+                        }
+                    }
+                    if (askTariff && cell.product.tariffs.size == 1) Text("Ce produit n'a qu'un tarif : renseignez Prix 1 ou Prix 2 dans sa fiche.", fontSize = 12.sp, color = Muted)
+                }
                 Text("Libérer retire la touche de cette page ; le produit reste au catalogue.", fontSize = 12.sp, color = Muted)
             }
         },

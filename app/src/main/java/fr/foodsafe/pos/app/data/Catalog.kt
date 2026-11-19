@@ -36,6 +36,12 @@ data class Product(
     val outOfTurnover: Boolean = false,
 )
 
+/** Tarifs renseignés : 0 = normal, puis 1, 2… (seulement ceux qui ont un prix). */
+val Product.tariffs: List<Pair<Int, Cents>> get() = listOfNotNull(0 to price, price1?.let { 1 to it }, price2?.let { 2 to it })
+
+/** Prix du tarif demandé ; un tarif sans prix retombe sur le prix normal. */
+fun Product.priceFor(tariff: Int?): Cents = when (tariff) { 1 -> price1; 2 -> price2; else -> null } ?: price
+
 enum class GoodsType(val label: String) { PRODUCT("Produit"), MERCHANDISE("Marchandise"), SERVICE("Service") }
 
 /** Catalogue de démonstration : copié en base au premier lancement, puis modifiable dans « Produits et claviers ». */

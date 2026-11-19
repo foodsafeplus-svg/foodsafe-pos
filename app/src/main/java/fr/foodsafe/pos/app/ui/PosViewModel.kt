@@ -130,6 +130,7 @@ class PosViewModel(app: Application) : AndroidViewModel(app) {
     /** La modification du catalogue est réservée au responsable (règle EDIT_CATALOG). */
     val canEditCatalog get() = _state.value.user?.role != fr.foodsafe.pos.core.auth.Role.SERVER
     fun notify(text: String) { _state.value = _state.value.copy(message = text) }
+    fun setCellTariff(pageId: String, slot: Int, tariff: Int?) = catalogEdit("Tarification fixée") { repo.catalog.setCellTariff(it, pageId, slot, tariff) }
     fun clearCell(pageId: String, slot: Int) = catalogEdit { repo.catalog.clearCell(it, pageId, slot) }
     fun createAndPlace(p: Product, pageId: String, slot: Int, onDone: () -> Unit) =
         act<Product>("Produit « ${p.label} » créé et placé", onSuccess = { onDone() }) { _, _ -> repo.catalog.createAndPlace(userId(), p, pageId, slot) }

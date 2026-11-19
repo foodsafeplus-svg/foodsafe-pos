@@ -62,4 +62,13 @@ class MigrationTest {
         }
         db.query("SELECT COUNT(*) FROM formulas").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
     }
+
+    @Test fun migration5vers6AjouteLeTarifDesTouches() {
+        helper.createDatabase("migr6.db", 5).apply {
+            execSQL("INSERT INTO keyboard_cells (pageId, slot, kind, targetId, color) VALUES ('page-1', 0, 'PRODUCT', 'salade', NULL)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate("migr6.db", 6, true)
+        db.query("SELECT tariff FROM keyboard_cells").use { it.moveToFirst(); assert(it.isNull(0)) }
+    }
 }

@@ -272,4 +272,15 @@ class PosRepositoryTest {
         assertEquals(null, cells()[1])
         assertTrue(runBlocking { repo.catalog.state.first() }.keyboards.first().cellsOf("page-2")[20] != null)
     }
+
+    @Test fun fixerTarificationSurUneTouche() {
+        repo.catalog.saveProduct("paul", p.getValue("salade").copy(price1 = Cents(850), price2 = Cents(1050)))
+        try { repo.catalog.setCellTariff("marie", "page-1", 0, 2); fail() } catch (_: fr.foodsafe.pos.app.data.ActionDenied) {}
+        repo.catalog.setCellTariff("paul", "page-1", 0, 2)
+        val cell = runBlocking { repo.catalog.state.first() }.keyboards.first().cellsOf("page-1")[0] as fr.foodsafe.pos.app.data.KeyboardCell.ProductCell
+        assertEquals(Cents(1050), cell.price)
+        repo.catalog.setCellTariff("paul", "page-1", 0, null)
+        val back = runBlocking { repo.catalog.state.first() }.keyboards.first().cellsOf("page-1")[0] as fr.foodsafe.pos.app.data.KeyboardCell.ProductCell
+        assertEquals(Cents(950), back.price)
+    }
 }
